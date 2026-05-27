@@ -94,7 +94,7 @@ type SavedRoundState = {
 type ActiveCalculation = {
   gameResult: GameResult;
   currentGamePreview: CurrentGamePreview | null;
-  latestResult: ReturnType<typeof getLatestGameResult>;
+  latestResult: ReturnType<typeof getLatestGameResult> | null;
   strokeBet: ReturnType<typeof calculateStrokeBet> | null;
   poolSummary: {
     totalPool: number;
