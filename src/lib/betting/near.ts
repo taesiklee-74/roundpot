@@ -63,3 +63,36 @@ export function getNearGameKindFromPreview(
 
   return "stroke";
 }
+
+export function upsertNearResult(params: {
+  nearResults: NearResult[];
+  hole: {
+    id: string;
+    holeNumber: number;
+  };
+  gameKind: NearGameKind;
+  winnerPlayerId: string | null;
+  amount: number;
+}): NearResult[] {
+  const { nearResults, hole, gameKind, winnerPlayerId, amount } = params;
+
+  const nextResult: NearResult = {
+    holeId: hole.id,
+    holeNumber: hole.holeNumber,
+    gameKind,
+    winnerPlayerId,
+    amount,
+  };
+
+  const existingIndex = nearResults.findIndex(
+    (result) => result.holeId === hole.id
+  );
+
+  if (existingIndex === -1) {
+    return [...nearResults, nextResult];
+  }
+
+  return nearResults.map((result, index) =>
+    index === existingIndex ? nextResult : result
+  );
+}
