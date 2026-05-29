@@ -243,13 +243,11 @@ export function calculateNearSettlementSummary(params: {
         return;
       }
 
-      const amountPerTeamMember = result.amount / winnerTeam.playerIds.length;
-
       winnerTeam.playerIds.forEach((playerId) => {
         addNearPrize({
           summary,
           playerId,
-          amount: amountPerTeamMember,
+          amount: result.amount,
           reason: `${result.holeNumber}번 홀 라스베가스 팀 니어 수령`,
         });
       });

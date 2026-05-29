@@ -1403,7 +1403,7 @@ function saveCurrentHoleAndGoNext() {
             <div className="mt-4 rounded-xl bg-lime-50 p-3 text-sm text-lime-900">
               <p className="font-semibold">지급 방식</p>
               <p>스킨스·후세인·학교·스트로크: 니어 위너 개인에게 지급</p>
-              <p>라스베가스: 니어 라스베가스 팀 니어: 위너가 속한 팀이 니어 상금을 나눠 수령</p>
+              <p>라스베가스: 니어 라스베가스 팀 니어: 위너가 속한 팀원 각각 니어 상금 수령</p>
             </div>
           </section>
 
