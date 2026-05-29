@@ -115,9 +115,18 @@ export type NearTeamAssignmentLike = {
 export type NearSettlementSummary = {
   players: NearPlayerSettlement[];
   byPlayerId: Record<string, NearPlayerSettlement>;
+  totalPool: number;
+  contributionPerPlayer: number;
+  paidAmount: number;
+  remainingPool: number;
 };
 
-function createEmptyNearSettlement(playerIds: string[]): NearSettlementSummary {
+function createEmptyNearSettlement(params: {
+  playerIds: string[];
+  totalPool: number;
+}): NearSettlementSummary {
+  const { playerIds, totalPool } = params;
+
   const players = playerIds.map((playerId) => ({
     playerId,
     totalAmount: 0,
@@ -134,10 +143,15 @@ function createEmptyNearSettlement(playerIds: string[]): NearSettlementSummary {
         playerSettlement,
       ])
     ),
+    totalPool,
+    contributionPerPlayer:
+      playerIds.length > 0 ? totalPool / playerIds.length : 0,
+    paidAmount: 0,
+    remainingPool: totalPool,
   };
 }
 
-function addNearAmount(params: {
+function addNearPrize(params: {
   summary: NearSettlementSummary;
   playerId: string;
   amount: number;
@@ -146,22 +160,19 @@ function addNearAmount(params: {
   const { summary, playerId, amount, reason } = params;
   const playerSettlement = summary.byPlayerId[playerId];
 
-  if (!playerSettlement || amount === 0) {
+  if (!playerSettlement || amount <= 0) {
     return;
   }
 
   playerSettlement.totalAmount += amount;
-
-  if (amount > 0) {
-    playerSettlement.receivedAmount += amount;
-  } else {
-    playerSettlement.paidAmount += Math.abs(amount);
-  }
-
+  playerSettlement.receivedAmount += amount;
   playerSettlement.breakdowns.push(reason);
+
+  summary.paidAmount += amount;
+  summary.remainingPool = Math.max(0, summary.totalPool - summary.paidAmount);
 }
 
-function findVegasNearTeams(params: {
+function findVegasNearWinnerTeam(params: {
   result: NearResult;
   assignments: NearTeamAssignmentLike[];
 }) {
@@ -182,27 +193,40 @@ function findVegasNearTeams(params: {
     team.playerIds.includes(winnerPlayerId)
   );
 
-  const loserTeam = assignment.teams.find(
-    (team) => !team.playerIds.includes(winnerPlayerId)
-  );
-
-  if (!winnerTeam || !loserTeam) {
+  if (!winnerTeam) {
     return null;
   }
 
-  return {
-    winnerTeamPlayerIds: winnerTeam.playerIds,
-    loserTeamPlayerIds: loserTeam.playerIds,
-  };
+  return winnerTeam;
 }
 
 export function calculateNearSettlementSummary(params: {
   playerIds: string[];
+  nearEnabled: boolean;
+  nearAmount: number;
   nearResults: NearResult[];
   vegasTeamAssignments?: NearTeamAssignmentLike[];
+  nearHoleCount?: number;
 }): NearSettlementSummary {
-  const { playerIds, nearResults, vegasTeamAssignments = [] } = params;
-  const summary = createEmptyNearSettlement(playerIds);
+  const {
+    playerIds,
+    nearEnabled,
+    nearAmount,
+    nearResults,
+    vegasTeamAssignments = [],
+    nearHoleCount = 4,
+  } = params;
+
+  const totalPool = nearEnabled ? nearAmount * nearHoleCount : 0;
+
+  const summary = createEmptyNearSettlement({
+    playerIds,
+    totalPool,
+  });
+
+  if (!nearEnabled || nearAmount <= 0) {
+    return summary;
+  }
 
   nearResults.forEach((result) => {
     if (!result.winnerPlayerId || result.amount <= 0) {
@@ -210,54 +234,38 @@ export function calculateNearSettlementSummary(params: {
     }
 
     if (result.gameKind === "vegas") {
-      const teams = findVegasNearTeams({
+      const winnerTeam = findVegasNearWinnerTeam({
         result,
         assignments: vegasTeamAssignments,
       });
 
-      if (!teams) {
+      if (!winnerTeam || winnerTeam.playerIds.length === 0) {
         return;
       }
 
-      teams.winnerTeamPlayerIds.forEach((playerId) => {
-        addNearAmount({
-          summary,
-          playerId,
-          amount: result.amount,
-          reason: `${result.holeNumber}번 홀 라스베가스 팀 니어 수령`,
-        });
-      });
+      const amountPerTeamMember = result.amount / winnerTeam.playerIds.length;
 
-      teams.loserTeamPlayerIds.forEach((playerId) => {
-        addNearAmount({
+      winnerTeam.playerIds.forEach((playerId) => {
+        addNearPrize({
           summary,
           playerId,
-          amount: -result.amount,
-          reason: `${result.holeNumber}번 홀 라스베가스 팀 니어 지급`,
+          amount: amountPerTeamMember,
+          reason: `${result.holeNumber}번 홀 라스베가스 팀 니어 수령`,
         });
       });
 
       return;
     }
 
-    playerIds.forEach((playerId) => {
-      if (playerId === result.winnerPlayerId) {
-        addNearAmount({
-          summary,
-          playerId,
-          amount: result.amount * (playerIds.length - 1),
-          reason: `${result.holeNumber}번 홀 니어 수령`,
-        });
-      } else {
-        addNearAmount({
-          summary,
-          playerId,
-          amount: -result.amount,
-          reason: `${result.holeNumber}번 홀 니어 지급`,
-        });
-      }
+    addNearPrize({
+      summary,
+      playerId: result.winnerPlayerId,
+      amount: result.amount,
+      reason: `${result.holeNumber}번 홀 니어 수령`,
     });
   });
+
+  summary.remainingPool = Math.max(0, summary.totalPool - summary.paidAmount);
 
   return summary;
 }
