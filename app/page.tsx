@@ -13,6 +13,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ScorecardSection from "./components/ScorecardSection";
 import {
   DEFAULT_BETTING_SETTINGS,
   type BettingMode,
@@ -75,6 +76,16 @@ const DEFAULT_PARS: Array<3 | 4 | 5> = [
 
 const DEFAULT_PLAYER_NAMES = ["1프로", "2프로", "3프로", "4프로"];
 
+type NearGameKind = "stroke" | "skins" | "vegas" | "hussein" | "school";
+
+type NearResult = {
+  holeId: string;
+  holeNumber: number;
+  gameKind: NearGameKind;
+  winnerPlayerId: string | null;
+  amount: number;
+};
+
 type SavedRoundState = {
   hasStarted: boolean;
   courseName: string;
@@ -88,6 +99,9 @@ type SavedRoundState = {
   currentHoleIndex: number;
   vegasTeamAssignments: TeamAssignment[];
   husseinAssignments: HusseinAssignment[];
+  nearEnabled: boolean;
+  nearAmount: number;
+  nearResults: NearResult[];
   savedAt: string;
 };
 
@@ -225,6 +239,36 @@ function getSavedScoreToPar(scores: Score[], hole: Hole, playerId: string) {
   return score.strokes - hole.par;
 }
 
+function getPlayerScoreTotalToPar(params: {
+  scores: Score[];
+  holes: Hole[];
+  playerId: string;
+  fromHoleNumber: number;
+  toHoleNumber: number;
+}) {
+  const { scores, holes, playerId, fromHoleNumber, toHoleNumber } = params;
+
+  let total = 0;
+  let hasAnySavedScore = false;
+
+  const targetHoles = holes.filter(
+    (hole) => hole.holeNumber >= fromHoleNumber && hole.holeNumber <= toHoleNumber
+  );
+
+  for (const hole of targetHoles) {
+    const scoreToPar = getSavedScoreToPar(scores, hole, playerId);
+
+    if (scoreToPar === null) {
+      continue;
+    }
+
+    total += scoreToPar;
+    hasAnySavedScore = true;
+  }
+
+  return hasAnySavedScore ? total : null;
+}
+
 function isHoleSaved(players: Player[], scores: Score[], holeId: string) {
   return players.every((player) => {
     const score = getScoreObject(scores, holeId, player.id);
@@ -240,6 +284,28 @@ function formatTeam(players: Player[], playerIds: string[]) {
   return playerIds.map((playerId) => getPlayerName(players, playerId)).join(" · ");
 }
 
+function getNearGameKindFromPreview(
+  mode: BettingMode,
+  preview: CurrentGamePreview | null
+): NearGameKind {
+  if (mode !== "cycle") {
+    return mode as NearGameKind;
+  }
+
+  const title = preview?.title ?? "";
+
+  if (title.includes("라스베가스")) return "vegas";
+  if (title.includes("후세인")) return "hussein";
+  if (title.includes("학교")) return "school";
+  if (title.includes("스킨스")) return "skins";
+
+  return "skins";
+}
+
+function getNearResultForHole(nearResults: NearResult[], holeId: string) {
+  return nearResults.find((result) => result.holeId === holeId) ?? null;
+}
+
 type SchoolLatestResultDisplay = {
   firstPrizeAmount?: number;
   secondPrizeAmount?: number;
@@ -252,12 +318,25 @@ type SchoolLatestResultDisplay = {
 };
 
 type VegasLatestResultDisplay = {
+  innerGameType?: "skins" | "hussein" | "vegas";
   teamAPlayerIds?: string[];
   teamBPlayerIds?: string[];
   teamAScore?: number;
   teamBScore?: number;
   winnerTeamId?: "A" | "B" | null;
   assignmentReason?: string;
+};
+
+type HusseinLatestResultDisplay = {
+  innerGameType?: "skins" | "hussein" | "vegas";
+  husseinPlayerId?: string;
+  husseinPlayerScore?: number;
+  restPlayerIds?: string[];
+  restBestScore?: number;
+  restTotalScore?: number;
+  husseinCompareScore?: number;
+  restCompareScore?: number;
+  husseinWinnerType?: "hussein" | "rest" | "tie";
 };
 
 type VegasDrawAnimation = {
@@ -280,6 +359,20 @@ function isSkinsDisplayResult(
   result: { gameType: string; title: string } & SkinsLatestResultDisplay
 ) {
   return mode === "skins" || result.innerGameType === "skins";
+}
+
+function isVegasDisplayResult(
+  mode: BettingMode,
+  result: { gameType: string; title: string } & VegasLatestResultDisplay
+) {
+  return mode === "vegas" || result.innerGameType === "vegas";
+}
+
+function isHusseinDisplayResult(
+  mode: BettingMode,
+  result: { gameType: string; title: string } & HusseinLatestResultDisplay
+) {
+  return mode === "hussein" || result.innerGameType === "hussein";
 }
 
 function getSchoolCurrentLabel(params: {
@@ -599,6 +692,9 @@ export default function Home() {
   const [vegasTeamAssignments, setVegasTeamAssignments] = useState<TeamAssignment[]>([]);
   const [husseinAssignments, setHusseinAssignments] = useState<HusseinAssignment[]>([]);
   const [vegasDrawAnimation, setVegasDrawAnimation] = useState<VegasDrawAnimation | null>(null);
+  const [nearEnabled, setNearEnabled] = useState(false);
+  const [nearAmount, setNearAmount] = useState(5000);
+  const [nearResults, setNearResults] = useState<NearResult[]>([]);
 
   useEffect(() => {
     try {
@@ -638,6 +734,13 @@ export default function Home() {
       setHusseinAssignments(
         Array.isArray(saved.husseinAssignments) ? saved.husseinAssignments : []
       );
+      setNearEnabled(Boolean(saved.nearEnabled));
+      setNearAmount(
+        typeof saved.nearAmount === "number" && saved.nearAmount >= 0
+          ? saved.nearAmount
+          : 5000
+      );
+      setNearResults(Array.isArray(saved.nearResults) ? saved.nearResults : []);
       setLastSavedAt(typeof saved.savedAt === "string" ? saved.savedAt : null);
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -663,6 +766,9 @@ export default function Home() {
       currentHoleIndex,
       vegasTeamAssignments,
       husseinAssignments,
+      nearEnabled,
+      nearAmount,
+      nearResults,
       savedAt,
     };
 
@@ -682,6 +788,9 @@ export default function Home() {
     currentHoleIndex,
     vegasTeamAssignments,
     husseinAssignments,
+    nearEnabled,
+    nearAmount,
+    nearResults,
   ]);
 
   const activeCalculation = useMemo(
@@ -910,6 +1019,7 @@ export default function Home() {
     setScores(nextScores);
     setVegasTeamAssignments([]);
     setHusseinAssignments([]);
+    setNearResults([]);
     setVegasDrawAnimation(null);
     setCurrentHoleIndex(0);
     setHasStarted(true);
@@ -935,6 +1045,9 @@ export default function Home() {
     setCurrentHoleIndex(0);
     setVegasTeamAssignments([]);
     setHusseinAssignments([]);
+    setNearEnabled(false);
+    setNearAmount(5000);
+    setNearResults([]);
     setVegasDrawAnimation(null);
     setLastSavedAt(null);
   }
@@ -956,6 +1069,34 @@ export default function Home() {
       })
     );
   }
+
+  function updateNearWinner(params: {
+  hole: Hole;
+  gameKind: NearGameKind;
+  winnerPlayerId: string | null;
+}) {
+  const { hole, gameKind, winnerPlayerId } = params;
+
+  setNearResults((prev) => {
+    const nextResult: NearResult = {
+      holeId: hole.id,
+      holeNumber: hole.holeNumber,
+      gameKind,
+      winnerPlayerId,
+      amount: nearAmount,
+    };
+
+    const exists = prev.some((result) => result.holeId === hole.id);
+
+    if (!exists) {
+      return [...prev, nextResult];
+    }
+
+    return prev.map((result) =>
+      result.holeId === hole.id ? nextResult : result
+    );
+  });
+}
 
 function saveCurrentHoleAndGoNext() {
   if (!currentHole) return;
@@ -1245,6 +1386,41 @@ function saveCurrentHoleAndGoNext() {
             <h2 className="text-lg font-bold">내기 방식 선택</h2>
             <div className="mt-4 grid grid-cols-2 gap-2">
               {(["stroke", "skins", "vegas", "hussein", "school", "cycle"] as BettingMode[]).map(renderModeButton)}
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold">니어 옵션</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+                파3 홀에서 모든 게임에 적용됩니다.
+            </p>
+
+            <label className="mt-4 flex items-center justify-between rounded-xl bg-neutral-50 p-3">
+              <span className="font-medium">니어 사용</span>
+              <input
+                type="checkbox"
+                checked={nearEnabled}
+                onChange={(event) => setNearEnabled(event.target.checked)}
+              />
+            </label>
+
+            <label className="mt-4 block text-sm font-medium text-neutral-700">
+              니어 상금
+            </label>
+            <input
+              type="number"
+              className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-400"
+              value={nearAmount}
+              onChange={(event) => setNearAmount(Number(event.target.value || 0))}
+              min={0}
+              step={1000}
+              disabled={!nearEnabled}
+            />
+
+            <div className="mt-4 rounded-xl bg-lime-50 p-3 text-sm text-lime-900">
+              <p className="font-semibold">지급 방식</p>
+              <p>스킨스·후세인·학교·스트로크: 니어 위너 개인에게 지급</p>
+              <p>라스베가스: 니어 위너가 속한 팀에 총 {formatPlainAmount(nearAmount * 2)} 지급</p>
             </div>
           </section>
 
@@ -1746,13 +1922,13 @@ function saveCurrentHoleAndGoNext() {
               <p className="font-semibold">{preview.title}</p>
               <p className="mt-1 text-sm text-neutral-600">{preview.description}</p>
               {preview.prizeAmount > 0 && (
-  <div className="mt-4 rounded-2xl bg-blue-50 p-4">
-    <p className="text-sm font-semibold text-blue-700">이번 홀 상금</p>
-    <p className="mt-1 text-3xl font-black text-blue-700">
-      {formatPlainAmount(preview.prizeAmount)}
-    </p>
-  </div>
-)}
+                <div className="mt-4 rounded-2xl bg-blue-50 p-4">
+                  <p className="text-sm font-semibold text-blue-700">이번 홀 상금</p>
+                  <p className="mt-1 text-3xl font-black text-blue-700">
+                    {formatPlainAmount(preview.prizeAmount)}
+                  </p>
+                </div>
+              )}
               {preview.teams && (
                 <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                   {preview.teams.map((team) => (
@@ -1763,11 +1939,26 @@ function saveCurrentHoleAndGoNext() {
                   ))}
                 </div>
               )}
+
               {preview.husseinPlayerId && (
-                <p className="mt-2 text-sm font-semibold text-purple-700">
-                  후세인: {getPlayerName(players, preview.husseinPlayerId)}
-                </p>
+                <div className="mt-4 rounded-2xl bg-purple-50 p-4">
+                  <p className="text-sm font-semibold text-purple-700">이번 홀 후세인</p>
+                  <p className="mt-1 text-3xl font-black text-purple-900">
+                    {getPlayerName(players, preview.husseinPlayerId)}
+                  </p>
+                  <p className="mt-2 text-sm text-purple-800">
+                    상대팀:{" "}
+                    {formatTeam(
+                      players,
+                      players
+                        .filter((player) => player.id !== preview.husseinPlayerId)
+                        .map((player) => player.id)
+                    )}
+                  </p>
+                </div>
               )}
+
+
             </div>
           </section>
         )}
@@ -1900,7 +2091,10 @@ function saveCurrentHoleAndGoNext() {
           </p>
         </div>
       );
-    })() : settings.mode === "vegas" ? (() => {
+    })() : isVegasDisplayResult(
+      settings.mode,
+      latestResult as typeof latestResult & VegasLatestResultDisplay
+    ) ? (() => {  
   const vegasResult = latestResult as typeof latestResult & VegasLatestResultDisplay;
   const teamAScore = vegasResult.teamAScore ?? 0;
   const teamBScore = vegasResult.teamBScore ?? 0;
@@ -1923,10 +2117,13 @@ function saveCurrentHoleAndGoNext() {
   return (
     <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xl font-bold">{latestResult.holeNumber}번 홀 라스베가스</p>
-        <p className={`text-xl font-black ${winnerTeamId ? "text-blue-600" : "text-amber-600"}`}>
+          <p className="text-xl font-bold">
+              {latestResult.holeNumber}번 홀{" "}
+              {settings.mode === "cycle" ? "순환게임 · 라스베가스" : "라스베가스"}
+          </p>        
+          <p className={`text-xl font-black ${winnerTeamId ? "text-blue-600" : "text-amber-600"}`}>
           {resultText}
-        </p>
+          </p>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -1957,7 +2154,138 @@ function saveCurrentHoleAndGoNext() {
       )}
     </div>
   );
-})() : isSkinsDisplayResult(
+    })() : isHusseinDisplayResult(
+    settings.mode,
+    latestResult as typeof latestResult & HusseinLatestResultDisplay
+    ) ? (() => {
+    const husseinResult = latestResult as typeof latestResult & HusseinLatestResultDisplay;
+
+    const husseinPlayerId = husseinResult.husseinPlayerId ?? latestResult.winnerPlayerIds[0] ?? "";
+    const restPlayerIds =
+      husseinResult.restPlayerIds ??
+      players
+        .filter((player) => player.id !== husseinPlayerId)
+        .map((player) => player.id);
+
+    const winnerType =
+      husseinResult.husseinWinnerType ??
+      (latestResult.winnerPlayerIds.length === 1
+        ? "hussein"
+        : latestResult.winnerPlayerIds.length > 1
+        ? "rest"
+        : "tie");
+
+    const titleText =
+      settings.mode === "cycle"
+        ? `${latestResult.holeNumber}번 홀 순환게임 · 후세인`
+        : `${latestResult.holeNumber}번 홀 후세인`;
+
+    const resultText =
+      winnerType === "hussein"
+        ? "후세인 승리"
+        : winnerType === "rest"
+        ? "3명팀 승리"
+        : "동점";
+
+    const prizePerPlayer =
+      winnerType === "rest" && latestResult.winnerPlayerIds.length > 0
+        ? latestResult.prizeAmount / latestResult.winnerPlayerIds.length
+        : latestResult.prizeAmount;
+
+    return (
+      <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xl font-bold">{titleText}</p>
+          <p
+            className={`text-xl font-black ${
+              winnerType === "tie" ? "text-amber-600" : "text-blue-600"
+            }`}
+          >
+            {resultText}
+          </p>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-3">
+          <div
+            className={`rounded-2xl p-4 ${
+              winnerType === "hussein" ? "bg-blue-50" : "bg-white"
+            }`}
+          >
+            <p className="text-sm font-semibold text-neutral-500">후세인</p>
+            <p className="mt-1 text-2xl font-black text-neutral-900">
+              {getPlayerName(players, husseinPlayerId)}
+            </p>
+            {husseinResult.husseinPlayerScore !== undefined && (
+              <p className="mt-1 text-sm text-neutral-500">
+                {husseinResult.husseinPlayerScore}타
+              </p>
+            )}
+          </div>
+
+          <div
+            className={`rounded-2xl p-4 ${
+              winnerType === "rest" ? "bg-blue-50" : "bg-white"
+            }`}
+          >
+            <p className="text-sm font-semibold text-neutral-500">3명팀</p>
+            <p className="mt-1 text-xl font-black text-neutral-900">
+              {formatTeam(players, restPlayerIds)}
+            </p>
+            {husseinResult.restBestScore !== undefined && (
+              <p className="mt-1 text-sm text-neutral-500">
+                베스트 {husseinResult.restBestScore}타
+                {husseinResult.restTotalScore !== undefined
+                  ? ` · 합산 ${husseinResult.restTotalScore}타`
+                  : ""}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div
+          className={`mt-3 rounded-2xl p-4 ${
+            winnerType === "tie" ? "bg-amber-50" : "bg-blue-50"
+          }`}
+        >
+          <p
+            className={`text-sm font-semibold ${
+              winnerType === "tie" ? "text-amber-700" : "text-blue-700"
+            }`}
+          >
+            {winnerType === "tie" ? "이월 상금" : "수령 상금"}
+          </p>
+
+          <p
+            className={`mt-1 text-3xl font-black ${
+              winnerType === "tie" ? "text-amber-700" : "text-blue-700"
+            }`}
+          >
+            {formatPlainAmount(latestResult.prizeAmount)}
+          </p>
+
+          {winnerType !== "tie" && (
+            <p className="mt-2 text-sm font-semibold text-blue-700">
+              수령: {formatTeam(players, latestResult.winnerPlayerIds)}
+              {winnerType === "rest"
+                ? ` · 1인 ${formatPlainAmount(prizePerPlayer)}`
+                : ""}
+            </p>
+          )}
+        </div>
+
+        {latestResult.carriedIn > 0 && (
+          <p className="mt-3 text-xs text-blue-600">
+            이월 포함: {formatPlainAmount(latestResult.carriedIn)} + 기본{" "}
+            {formatPlainAmount(latestResult.baseAmount)}
+          </p>
+        )}
+
+        {latestResult.detail && (
+          <p className="mt-2 text-xs text-neutral-500">{latestResult.detail}</p>
+        )}
+      </div>
+    );
+    })(): isSkinsDisplayResult(
       settings.mode,
       latestResult as typeof latestResult & SkinsLatestResultDisplay
     ) ? (() => {
@@ -2109,6 +2437,75 @@ function saveCurrentHoleAndGoNext() {
             })}
           </div>
 
+          
+          {(() => {
+            const nearGameKind = getNearGameKindFromPreview(settings.mode, preview);
+            const nearEligible = Boolean(nearEnabled && currentHole.par === 3);
+            const currentNearResult = getNearResultForHole(nearResults, currentHole.id);
+
+            if (!nearEligible) return null;
+
+            return (
+              <div className="mt-4 rounded-2xl bg-lime-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-lime-700">파3 니어</p>
+                    <p className="mt-1 text-2xl font-black text-lime-900">
+                      {formatPlainAmount(nearAmount)}
+                    </p>
+                    <p className="mt-1 text-xs text-lime-800">
+                      {nearGameKind === "vegas"
+                        ? `라스베가스 팀 니어: 위너가 속한 팀에 총 ${formatPlainAmount(
+                            nearAmount * 2
+                          )} 지급`
+                        : "개인 니어: 위너에게 보너스 지급"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    className={`rounded-xl px-3 py-3 text-sm font-bold ${
+                      !currentNearResult?.winnerPlayerId
+                        ? "bg-lime-700 text-white"
+                        : "bg-white text-lime-900"
+                    }`}
+                    onClick={() =>
+                      updateNearWinner({
+                        hole: currentHole,
+                        gameKind: nearGameKind,
+                        winnerPlayerId: null,
+                      })
+                    }
+                  >
+                    니어 없음
+                  </button>
+
+                  {players.map((player) => (
+                    <button
+                      key={player.id}
+                      className={`rounded-xl px-3 py-3 text-sm font-bold ${
+                        currentNearResult?.winnerPlayerId === player.id
+                          ? "bg-lime-700 text-white"
+                          : "bg-white text-lime-900"
+                      }`}
+                      onClick={() =>
+                        updateNearWinner({
+                          hole: currentHole,
+                          gameKind: nearGameKind,
+                          winnerPlayerId: player.id,
+                        })
+                      }
+                    >
+                      {player.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+          
+          
           <button
             className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-bold text-white shadow-sm"
             onClick={saveCurrentHoleAndGoNext}
@@ -2162,44 +2559,15 @@ function saveCurrentHoleAndGoNext() {
           </section>
         )}
 
-        <section className="rounded-2xl bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-bold">전체 스코어카드</h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            홀별 표시는 Par 기준입니다. 예: 0은 파, +1은 보기, -1은 버디
-          </p>
-
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="py-2 text-left">홀</th>
-                  <th className="py-2 text-center">Par</th>
-                  {players.map((player) => (
-                    <th key={player.id} className="py-2 text-center">
-                      {player.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {holes.map((hole) => (
-                  <tr key={hole.id} className="border-b">
-                    <td className="py-2">{hole.holeNumber}</td>
-                    <td className="py-2 text-center">{hole.par}</td>
-                    {players.map((player) => {
-                      const scoreToPar = getSavedScoreToPar(scores, hole, player.id);
-                      return (
-                        <td key={player.id} className="py-2 text-center">
-                          {scoreToPar === null ? "-" : formatScoreToPar(scoreToPar)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+      <ScorecardSection
+        players={players}
+        holes={holes}
+        scores={scores}
+        holeCount={holeCount}
+        getSavedScoreToPar={getSavedScoreToPar}
+        getPlayerScoreTotalToPar={getPlayerScoreTotalToPar}
+        formatScoreToPar={formatScoreToPar}
+      />
       </div>
     </main>
   );
