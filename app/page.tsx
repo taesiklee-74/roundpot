@@ -70,8 +70,10 @@ import {
   getLatestGameResult,
 } from "../src/lib/betting/settlement";
 import {
+  calculateNearSettlementSummary,
   getNearGameKindFromPreview,
   getNearResultForHole,
+  upsertNearResult,
   type NearGameKind,
   type NearResult,
 } from "../src/lib/betting/near";
@@ -796,6 +798,16 @@ export default function Home() {
     });
   }, [activeCalculation, players, settings.mode]);
 
+  const nearSettlementSummary = useMemo(
+  () =>
+    calculateNearSettlementSummary({
+      playerIds: players.map((player) => player.id),
+      nearResults: nearEnabled ? nearResults : [],
+      vegasTeamAssignments,
+    }),
+  [players, nearEnabled, nearResults, vegasTeamAssignments]
+  );
+
   const currentHole = holes[currentHoleIndex];
 
   function updatePlayerName(index: number, value: string) {
@@ -1055,25 +1067,15 @@ export default function Home() {
 }) {
   const { hole, gameKind, winnerPlayerId } = params;
 
-  setNearResults((prev) => {
-    const nextResult: NearResult = {
-      holeId: hole.id,
-      holeNumber: hole.holeNumber,
-      gameKind,
-      winnerPlayerId,
-      amount: nearAmount,
-    };
-
-    const exists = prev.some((result) => result.holeId === hole.id);
-
-    if (!exists) {
-      return [...prev, nextResult];
-    }
-
-    return prev.map((result) =>
-      result.holeId === hole.id ? nextResult : result
-    );
-  });
+  setNearResults((prev) =>
+  upsertNearResult({
+    nearResults: prev,
+    hole,
+    gameKind,
+    winnerPlayerId,
+    amount: nearAmount,
+  })
+);
 }
 
 function saveCurrentHoleAndGoNext() {
@@ -2058,25 +2060,73 @@ function saveCurrentHoleAndGoNext() {
           </p>
 
           <div className="mt-3 space-y-2">
-            {settlementSummary.players.map((summary) => (
-              <div key={summary.playerId} className="rounded-xl bg-neutral-50 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{summary.playerName}</span>
-                  <span className="font-bold text-blue-600">
-                    {formatAmount(summary.totalPrizeAmount)}
-                  </span>
+            {settlementSummary.players.map((summary) => {
+              const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
+              const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
+              const totalAmountWithNear = summary.totalPrizeAmount + nearTotalAmount;
+
+              return (
+                <div key={summary.playerId} className="rounded-xl bg-neutral-50 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">{summary.playerName}</span>
+                    <span className="font-bold text-blue-600">
+                      {formatAmount(totalAmountWithNear)}
+                    </span>
+                  </div>
+
+                  <p className="mt-1 text-xs text-neutral-500">
+                    {formatPrizeBreakdown(summary)}
+                  </p>
+
+                  {nearTotalAmount !== 0 && (
+                    <p className="mt-1 text-xs text-lime-700">
+                      니어 정산: {formatAmount(nearTotalAmount)}
+                    </p>
+                  )}
+
+                  <p className="mt-1 text-xs text-neutral-400">
+                    {formatSettlementReference(summary)}
+                  </p>
                 </div>
-                <p className="mt-1 text-xs text-neutral-500">
-                  {formatPrizeBreakdown(summary)}
-                </p>
-                <p className="mt-1 text-xs text-neutral-400">
-                  {formatSettlementReference(summary)}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
+        {nearSettlementSummary.players.some(
+          (summary) => summary.totalAmount !== 0
+        ) && (
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold">니어 정산</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              파3 니어 결과가 반영된 별도 정산입니다.
+            </p>
+
+            <div className="mt-3 space-y-2">
+              {nearSettlementSummary.players
+                .filter((summary) => summary.totalAmount !== 0)
+                .map((summary) => (
+                  <div key={summary.playerId} className="rounded-xl bg-lime-50 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">
+                        {getPlayerName(players, summary.playerId)}
+                      </span>
+                      <span className="font-bold text-lime-700">
+                        {formatAmount(summary.totalAmount)}
+                      </span>
+                    </div>
+
+                    {summary.breakdowns.length > 0 && (
+                      <p className="mt-1 text-xs text-lime-800">
+                        {summary.breakdowns.join(" · ")}
+                      </p>
+                    )}
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
+        
         {settings.mode === "stroke" && settlementSummary.pairwiseSettlements.length > 0 && (
           <section className="rounded-2xl bg-white p-5 shadow-sm">
             <h2 className="text-lg font-bold">스트로크 지급 내역</h2>
