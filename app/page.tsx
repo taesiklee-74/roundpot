@@ -69,6 +69,12 @@ import {
   formatSettlementReference,
   getLatestGameResult,
 } from "../src/lib/betting/settlement";
+import {
+  getNearGameKindFromPreview,
+  getNearResultForHole,
+  type NearGameKind,
+  type NearResult,
+} from "../src/lib/betting/near";
 
 const STORAGE_KEY = "roundpot.refactored.withSchool.v1";
 
@@ -78,16 +84,6 @@ const DEFAULT_PARS: Array<3 | 4 | 5> = [
 ];
 
 const DEFAULT_PLAYER_NAMES = ["1프로", "2프로", "3프로", "4프로"];
-
-type NearGameKind = "stroke" | "skins" | "vegas" | "hussein" | "school";
-
-type NearResult = {
-  holeId: string;
-  holeNumber: number;
-  gameKind: NearGameKind;
-  winnerPlayerId: string | null;
-  amount: number;
-};
 
 type SavedRoundState = {
   hasStarted: boolean;
@@ -287,27 +283,6 @@ function formatTeam(players: Player[], playerIds: string[]) {
   return playerIds.map((playerId) => getPlayerName(players, playerId)).join(" · ");
 }
 
-function getNearGameKindFromPreview(
-  mode: BettingMode,
-  preview: CurrentGamePreview | null
-): NearGameKind {
-  if (mode !== "cycle") {
-    return mode as NearGameKind;
-  }
-
-  const title = preview?.title ?? "";
-
-  if (title.includes("라스베가스")) return "vegas";
-  if (title.includes("후세인")) return "hussein";
-  if (title.includes("학교")) return "school";
-  if (title.includes("스킨스")) return "skins";
-
-  return "skins";
-}
-
-function getNearResultForHole(nearResults: NearResult[], holeId: string) {
-  return nearResults.find((result) => result.holeId === holeId) ?? null;
-}
 
 type SchoolLatestResultDisplay = {
   firstPrizeAmount?: number;
@@ -2065,7 +2040,7 @@ function saveCurrentHoleAndGoNext() {
               />
             );
           })()}
-          
+
           <button
             className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-bold text-white shadow-sm"
             onClick={saveCurrentHoleAndGoNext}

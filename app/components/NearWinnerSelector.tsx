@@ -1,16 +1,7 @@
 "use client";
 
 import type { Hole, Player } from "../../src/lib/betting/types";
-
-type NearGameKind = "stroke" | "skins" | "vegas" | "hussein" | "school";
-
-type NearResult = {
-  holeId: string;
-  holeNumber: number;
-  gameKind: NearGameKind;
-  winnerPlayerId: string | null;
-  amount: number;
-};
+import type { NearGameKind, NearResult } from "../../src/lib/betting/near";
 
 type NearWinnerSelectorProps = {
   enabled: boolean;
