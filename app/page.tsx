@@ -15,6 +15,8 @@
 import { useEffect, useMemo, useState } from "react";
 import ScorecardSection from "./components/ScorecardSection";
 import CurrentGamePreviewCard from "./components/CurrentGamePreviewCard";
+import LatestResultSection from "./components/LatestResultSection";
+import NearWinnerSelector from "./components/NearWinnerSelector";
 import {
   DEFAULT_BETTING_SETTINGS,
   type BettingMode,
@@ -1963,373 +1965,14 @@ function saveCurrentHoleAndGoNext() {
   </section>
 )}
 
-{latestResult && (
-  <section className="rounded-2xl bg-white p-5 shadow-sm">
-    <h2 className="text-lg font-bold">방금 홀 결과</h2>
-
-    {settings.mode === "school" ? (() => {
-      const schoolResult = latestResult as typeof latestResult & SchoolLatestResultDisplay;
-      const firstWinnerIds = schoolResult.firstPrizeWinnerPlayerIds ?? [];
-      const secondWinnerIds = schoolResult.secondPrizeWinnerPlayerIds ?? [];
-      const firstPrizeAmount = schoolResult.firstPrizeAmount ?? 0;
-      const secondPrizeAmount = schoolResult.secondPrizeAmount ?? 0;
-      const firstCarriedOut = schoolResult.firstPrizeCarriedOut ?? 0;
-      const secondCarriedOut = schoolResult.secondPrizeCarriedOut ?? 0;
-
-      const paidAmount =
-        (firstWinnerIds.length > 0 ? firstPrizeAmount : 0) +
-        (secondWinnerIds.length > 0 ? secondPrizeAmount : 0);
-
-      const carriedOutAmount = firstCarriedOut + secondCarriedOut;
-
-      const schoolLabel = getSchoolCurrentLabel({
-        result: schoolResult,
-        firstBaseAmount: settings.school.firstPrizeAmount,
-        secondBaseAmount: settings.school.secondPrizeAmount,
-      });
-
-      return (
-        <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xl font-bold">
-              {latestResult.holeNumber}번 홀 학교 · {schoolLabel}
-            </p>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 gap-3">
-            <div className="rounded-2xl bg-white p-4">
-              <p className="text-sm font-semibold text-neutral-500">1등 상금</p>
-              {firstWinnerIds.length > 0 ? (
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="text-lg font-bold text-neutral-900">
-                    {formatTeam(players, firstWinnerIds)}
-                  </p>
-                  <p className="text-lg font-bold text-blue-600">
-                    +{firstPrizeAmount.toLocaleString()}원
-                  </p>
-                </div>
-              ) : (
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="text-lg font-bold text-neutral-900">이월</p>
-                  <p className="text-lg font-bold text-amber-600">
-                    {firstCarriedOut.toLocaleString()}원
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl bg-white p-4">
-              <p className="text-sm font-semibold text-neutral-500">2등 상금</p>
-              {secondWinnerIds.length > 0 ? (
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="text-lg font-bold text-neutral-900">
-                    {formatTeam(players, secondWinnerIds)}
-                  </p>
-                  <p className="text-lg font-bold text-blue-600">
-                    +{secondPrizeAmount.toLocaleString()}원
-                  </p>
-                </div>
-              ) : (
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="text-lg font-bold text-neutral-900">이월</p>
-                  <p className="text-lg font-bold text-amber-600">
-                    {secondCarriedOut.toLocaleString()}원
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {latestResult.detail && (
-            <p className="mt-3 text-xs text-neutral-500">{latestResult.detail}</p>
-          )}
-
-          <p className="mt-3 text-xs text-neutral-400">
-            홀 총 상금 지출: {formatPlainAmount(paidAmount)}
-            {carriedOutAmount > 0
-              ? ` · 이월: ${formatPlainAmount(carriedOutAmount)}`
-              : ""}
-          </p>
-        </div>
-      );
-    })() : isVegasDisplayResult(
-      settings.mode,
-      latestResult as typeof latestResult & VegasLatestResultDisplay
-    ) ? (() => {  
-  const vegasResult = latestResult as typeof latestResult & VegasLatestResultDisplay;
-  const teamAScore = vegasResult.teamAScore ?? 0;
-  const teamBScore = vegasResult.teamBScore ?? 0;
-  const teamAPlayerIds = vegasResult.teamAPlayerIds ?? [];
-  const teamBPlayerIds = vegasResult.teamBPlayerIds ?? [];
-  const winnerTeamId = vegasResult.winnerTeamId ?? null;
-
-  const resultText = winnerTeamId === "A"
-    ? "A팀 승리"
-    : winnerTeamId === "B"
-    ? "B팀 승리"
-    : "동점";
-
-  const winnerPlayerIds = winnerTeamId === "A"
-    ? teamAPlayerIds
-    : winnerTeamId === "B"
-    ? teamBPlayerIds
-    : [];
-
-  return (
-    <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
-      <div className="flex items-center justify-between gap-2">
-          <p className="text-xl font-bold">
-              {latestResult.holeNumber}번 홀{" "}
-              {settings.mode === "cycle" ? "순환게임 · 라스베가스" : "라스베가스"}
-          </p>        
-          <p className={`text-xl font-black ${winnerTeamId ? "text-blue-600" : "text-amber-600"}`}>
-          {resultText}
-          </p>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div className={`rounded-2xl p-4 ${winnerTeamId === "A" ? "bg-blue-50" : "bg-white"}`}>
-          <p className="text-sm font-semibold text-neutral-500">A팀</p>
-          <p className="mt-1 text-3xl font-black text-neutral-900">{teamAScore}타</p>
-          <p className="mt-2 text-sm text-neutral-600">{formatTeam(players, teamAPlayerIds)}</p>
-        </div>
-        <div className={`rounded-2xl p-4 ${winnerTeamId === "B" ? "bg-blue-50" : "bg-white"}`}>
-          <p className="text-sm font-semibold text-neutral-500">B팀</p>
-          <p className="mt-1 text-3xl font-black text-neutral-900">{teamBScore}타</p>
-          <p className="mt-2 text-sm text-neutral-600">{formatTeam(players, teamBPlayerIds)}</p>
-        </div>
-      </div>
-
-      {winnerTeamId ? (
-        <p className="mt-3 text-sm font-semibold text-blue-700">
-          수령: {formatTeam(players, winnerPlayerIds)} · 1인 {formatPlainAmount(latestResult.prizeAmount / 2)}
-        </p>
-      ) : (
-        <p className="mt-3 text-sm font-semibold text-amber-700">
-          동점으로 {formatPlainAmount(latestResult.prizeAmount)} 이월
-        </p>
-      )}
-
-      {latestResult.detail && (
-        <p className="mt-2 text-xs text-neutral-500">{latestResult.detail}</p>
-      )}
-    </div>
-  );
-    })() : isHusseinDisplayResult(
-    settings.mode,
-    latestResult as typeof latestResult & HusseinLatestResultDisplay
-    ) ? (() => {
-    const husseinResult = latestResult as typeof latestResult & HusseinLatestResultDisplay;
-
-    const husseinPlayerId = husseinResult.husseinPlayerId ?? latestResult.winnerPlayerIds[0] ?? "";
-    const restPlayerIds =
-      husseinResult.restPlayerIds ??
-      players
-        .filter((player) => player.id !== husseinPlayerId)
-        .map((player) => player.id);
-
-    const winnerType =
-      husseinResult.husseinWinnerType ??
-      (latestResult.winnerPlayerIds.length === 1
-        ? "hussein"
-        : latestResult.winnerPlayerIds.length > 1
-        ? "rest"
-        : "tie");
-
-    const titleText =
-      settings.mode === "cycle"
-        ? `${latestResult.holeNumber}번 홀 순환게임 · 후세인`
-        : `${latestResult.holeNumber}번 홀 후세인`;
-
-    const resultText =
-      winnerType === "hussein"
-        ? "후세인 승리"
-        : winnerType === "rest"
-        ? "3명팀 승리"
-        : "동점";
-
-    const prizePerPlayer =
-      winnerType === "rest" && latestResult.winnerPlayerIds.length > 0
-        ? latestResult.prizeAmount / latestResult.winnerPlayerIds.length
-        : latestResult.prizeAmount;
-
-    return (
-      <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xl font-bold">{titleText}</p>
-          <p
-            className={`text-xl font-black ${
-              winnerType === "tie" ? "text-amber-600" : "text-blue-600"
-            }`}
-          >
-            {resultText}
-          </p>
-        </div>
-
-        <div className="mt-4 grid grid-cols-1 gap-3">
-          <div
-            className={`rounded-2xl p-4 ${
-              winnerType === "hussein" ? "bg-blue-50" : "bg-white"
-            }`}
-          >
-            <p className="text-sm font-semibold text-neutral-500">후세인</p>
-            <p className="mt-1 text-2xl font-black text-neutral-900">
-              {getPlayerName(players, husseinPlayerId)}
-            </p>
-            {husseinResult.husseinPlayerScore !== undefined && (
-              <p className="mt-1 text-sm text-neutral-500">
-                {husseinResult.husseinPlayerScore}타
-              </p>
-            )}
-          </div>
-
-          <div
-            className={`rounded-2xl p-4 ${
-              winnerType === "rest" ? "bg-blue-50" : "bg-white"
-            }`}
-          >
-            <p className="text-sm font-semibold text-neutral-500">3명팀</p>
-            <p className="mt-1 text-xl font-black text-neutral-900">
-              {formatTeam(players, restPlayerIds)}
-            </p>
-            {husseinResult.restBestScore !== undefined && (
-              <p className="mt-1 text-sm text-neutral-500">
-                베스트 {husseinResult.restBestScore}타
-                {husseinResult.restTotalScore !== undefined
-                  ? ` · 합산 ${husseinResult.restTotalScore}타`
-                  : ""}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div
-          className={`mt-3 rounded-2xl p-4 ${
-            winnerType === "tie" ? "bg-amber-50" : "bg-blue-50"
-          }`}
-        >
-          <p
-            className={`text-sm font-semibold ${
-              winnerType === "tie" ? "text-amber-700" : "text-blue-700"
-            }`}
-          >
-            {winnerType === "tie" ? "이월 상금" : "수령 상금"}
-          </p>
-
-          <p
-            className={`mt-1 text-3xl font-black ${
-              winnerType === "tie" ? "text-amber-700" : "text-blue-700"
-            }`}
-          >
-            {formatPlainAmount(latestResult.prizeAmount)}
-          </p>
-
-          {winnerType !== "tie" && (
-            <p className="mt-2 text-sm font-semibold text-blue-700">
-              수령: {formatTeam(players, latestResult.winnerPlayerIds)}
-              {winnerType === "rest"
-                ? ` · 1인 ${formatPlainAmount(prizePerPlayer)}`
-                : ""}
-            </p>
-          )}
-        </div>
-
-        {latestResult.carriedIn > 0 && (
-          <p className="mt-3 text-xs text-blue-600">
-            이월 포함: {formatPlainAmount(latestResult.carriedIn)} + 기본{" "}
-            {formatPlainAmount(latestResult.baseAmount)}
-          </p>
-        )}
-
-        {latestResult.detail && (
-          <p className="mt-2 text-xs text-neutral-500">{latestResult.detail}</p>
-        )}
-      </div>
-    );
-    })(): isSkinsDisplayResult(
-      settings.mode,
-      latestResult as typeof latestResult & SkinsLatestResultDisplay
-    ) ? (() => {
-      const skinsResult = latestResult as typeof latestResult & SkinsLatestResultDisplay;
-      const skinsPlayerIds = skinsResult.skinsPlayerIds ?? latestResult.winnerPlayerIds;
-      const isWin =
-        skinsResult.skinsResultType === "win" || latestResult.winnerPlayerIds.length === 1;
-      const scoreText =
-        skinsResult.skinsScore !== null && skinsResult.skinsScore !== undefined
-          ? `${skinsResult.skinsScore}타`
-          : "최저타";
-      const titleText =
-        settings.mode === "cycle"
-          ? `${latestResult.holeNumber}번 홀 순환게임 · 스킨스`
-          : `${latestResult.holeNumber}번 홀 스킨스`;
-
-      return (
-        <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xl font-bold">{titleText}</p>
-            <p className={`text-xl font-black ${isWin ? "text-blue-600" : "text-amber-600"}`}>
-              {isWin ? "승리" : "동점"}
-            </p>
-          </div>
-
-          <div className="mt-4 rounded-2xl bg-white p-4">
-            <p className="text-sm font-semibold text-neutral-500">
-              {isWin ? "승자" : "동점자"}
-            </p>
-            <p className="mt-1 text-2xl font-black text-neutral-900">
-              {formatTeam(players, skinsPlayerIds)}
-            </p>
-            <p className="mt-1 text-sm text-neutral-500">{scoreText}</p>
-          </div>
-
-          <div className={`mt-3 rounded-2xl p-4 ${isWin ? "bg-blue-50" : "bg-amber-50"}`}>
-            <p className={`text-sm font-semibold ${isWin ? "text-blue-700" : "text-amber-700"}`}>
-              {isWin ? "수령 상금" : "이월 상금"}
-            </p>
-            <p className={`mt-1 text-3xl font-black ${isWin ? "text-blue-700" : "text-amber-700"}`}>
-              {formatPlainAmount(latestResult.prizeAmount)}
-            </p>
-          </div>
-
-          {latestResult.carriedIn > 0 && (
-            <p className="mt-3 text-xs text-blue-600">
-              이월 포함: {formatPlainAmount(latestResult.carriedIn)} + 기본{" "}
-              {formatPlainAmount(latestResult.baseAmount)}
-            </p>
-          )}
-
-          {latestResult.detail && (
-            <p className="mt-2 text-xs text-neutral-500">{latestResult.detail}</p>
-          )}
-        </div>
-      );
-    })() : (
-      <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
-        <div className="flex items-center justify-between gap-2">
-          <p className="font-semibold">{latestResult.title}</p>
-          {latestResult.prizeAmount > 0 && (
-            <p className="font-bold">
-              {latestResult.isCarryOver
-                ? `${latestResult.prizeAmount.toLocaleString()}원 이월`
-                : `+${latestResult.prizeAmount.toLocaleString()}원`}
-            </p>
-          )}
-        </div>
-        <p className="mt-2 text-sm text-neutral-700">{latestResult.description}</p>
-        {latestResult.detail && (
-          <p className="mt-1 text-xs text-neutral-500">{latestResult.detail}</p>
-        )}
-        {latestResult.winnerPlayerIds.length > 0 && latestResult.prizeAmount > 0 && (
-          <p className="mt-2 text-sm font-semibold text-blue-700">
-            수령: {formatTeam(players, latestResult.winnerPlayerIds)} · 총{" "}
-            {formatPlainAmount(latestResult.prizeAmount)}
-          </p>
-        )}
-      </div>
-    )}
-  </section>
-)}
-
+<LatestResultSection
+  latestResult={latestResult}
+  settings={settings}
+  players={players}
+  formatTeam={formatTeam}
+  formatPlainAmount={formatPlainAmount}
+  getPlayerName={getPlayerName}
+/>
 
         <section className="rounded-2xl bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
@@ -2398,74 +2041,30 @@ function saveCurrentHoleAndGoNext() {
             })}
           </div>
 
-          
+                  
           {(() => {
             const nearGameKind = getNearGameKindFromPreview(settings.mode, preview);
-            const nearEligible = Boolean(nearEnabled && currentHole.par === 3);
             const currentNearResult = getNearResultForHole(nearResults, currentHole.id);
 
-            if (!nearEligible) return null;
-
             return (
-              <div className="mt-4 rounded-2xl bg-lime-50 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-lime-700">파3 니어</p>
-                    <p className="mt-1 text-2xl font-black text-lime-900">
-                      {formatPlainAmount(nearAmount)}
-                    </p>
-                    <p className="mt-1 text-xs text-lime-800">
-                      {nearGameKind === "vegas"
-                        ? `라스베가스 팀 니어: 위너가 속한 팀에 총 ${formatPlainAmount(
-                            nearAmount * 2
-                          )} 지급`
-                        : "개인 니어: 위너에게 보너스 지급"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    className={`rounded-xl px-3 py-3 text-sm font-bold ${
-                      !currentNearResult?.winnerPlayerId
-                        ? "bg-lime-700 text-white"
-                        : "bg-white text-lime-900"
-                    }`}
-                    onClick={() =>
-                      updateNearWinner({
-                        hole: currentHole,
-                        gameKind: nearGameKind,
-                        winnerPlayerId: null,
-                      })
-                    }
-                  >
-                    니어 없음
-                  </button>
-
-                  {players.map((player) => (
-                    <button
-                      key={player.id}
-                      className={`rounded-xl px-3 py-3 text-sm font-bold ${
-                        currentNearResult?.winnerPlayerId === player.id
-                          ? "bg-lime-700 text-white"
-                          : "bg-white text-lime-900"
-                      }`}
-                      onClick={() =>
-                        updateNearWinner({
-                          hole: currentHole,
-                          gameKind: nearGameKind,
-                          winnerPlayerId: player.id,
-                        })
-                      }
-                    >
-                      {player.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <NearWinnerSelector
+                enabled={nearEnabled}
+                hole={currentHole}
+                gameKind={nearGameKind}
+                amount={nearAmount}
+                players={players}
+                currentResult={currentNearResult}
+                formatPlainAmount={formatPlainAmount}
+                onChangeWinner={(winnerPlayerId) =>
+                  updateNearWinner({
+                    hole: currentHole,
+                    gameKind: nearGameKind,
+                    winnerPlayerId,
+                  })
+                }
+              />
             );
           })()}
-          
           
           <button
             className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-bold text-white shadow-sm"
