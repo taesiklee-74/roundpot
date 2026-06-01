@@ -864,13 +864,15 @@ export default function Home() {
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     setLastSavedAt(savedAt);
-  }, [
+    }, [
     isLoaded,
     hasStarted,
     courseName,
     holeCount,
     holePars,
+    holeHandicapRanks,
     playerNames,
+    playerHandicaps,
     settings,
     players,
     holes,
@@ -932,7 +934,15 @@ export default function Home() {
   function updateHoleHandicapRank(index: number, handicapRank: number | null) {
     setHoleHandicapRanks((prev) => {
       const nextRanks = normalizeHoleHandicapRanks(prev, holeCount);
-      nextRanks[index] = handicapRank;
+
+      nextRanks[index] =
+        typeof handicapRank === "number" &&
+        Number.isInteger(handicapRank) &&
+        handicapRank >= 1 &&
+        handicapRank <= holeCount
+          ? handicapRank
+          : null;
+
       return nextRanks;
     });
   }
