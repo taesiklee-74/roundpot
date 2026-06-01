@@ -12,9 +12,10 @@ export type Player = {
 };
 
 export type Hole = {
-  id: ID;
+  id: string;
   holeNumber: number;
   par: 3 | 4 | 5;
+  handicapRank?: number | null;
 };
 
 export type Score = {

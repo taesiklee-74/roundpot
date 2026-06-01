@@ -140,6 +140,7 @@ function createHoles(holeCount: 9 | 18, pars: Array<3 | 4 | 5>): Hole[] {
     id: `h${index + 1}`,
     holeNumber: index + 1,
     par: normalizedPars[index],
+    handicapRank: null,
   }));
 }
 
@@ -703,7 +704,14 @@ export default function Home() {
       );
       setSettings(ensureSettingsShape(saved.settings));
       setPlayers(Array.isArray(saved.players) ? saved.players : []);
-      setHoles(Array.isArray(saved.holes) ? saved.holes : []);
+      setHoles(
+        Array.isArray(saved.holes)
+          ? saved.holes.map((hole) => ({
+              ...hole,
+              handicapRank: hole.handicapRank ?? null,
+            }))
+          : []
+      );      
       setScores(Array.isArray(saved.scores) ? saved.scores : []);
       setCurrentHoleIndex(
         Number.isInteger(saved.currentHoleIndex) ? Number(saved.currentHoleIndex) : 0
