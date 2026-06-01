@@ -1,14 +1,15 @@
 // src/lib/betting/types.ts
 // 라운드팟 내기 엔진 공통 타입
 // 목적: 스트로크, 스킨스, 라스베가스, 후세인, 순환게임 계산 로직을 UI에서 분리하기 위한 기준 타입
+import type { PlayerHandicapSettings } from "./handicap";
 
 export type ID = string;
 
 export type Player = {
   id: ID;
   name: string;
-  handicap?: number;
   order?: number;
+  handicap?: PlayerHandicapSettings | null;
 };
 
 export type Hole = {

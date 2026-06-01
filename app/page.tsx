@@ -17,6 +17,10 @@ import ScorecardSection from "./components/ScorecardSection";
 import CurrentGamePreviewCard from "./components/CurrentGamePreviewCard";
 import LatestResultSection from "./components/LatestResultSection";
 import NearWinnerSelector from "./components/NearWinnerSelector";
+import type {
+  HandicapParValue,
+  PlayerHandicapSettings,
+} from "../src/lib/betting/handicap";
 import {
   DEFAULT_BETTING_SETTINGS,
   type BettingMode,
@@ -92,7 +96,9 @@ type SavedRoundState = {
   courseName: string;
   holeCount: 9 | 18;
   holePars: Array<3 | 4 | 5>;
+  holeHandicapRanks: Array<number | null>;
   playerNames: string[];
+  playerHandicaps: PlayerHandicapSettings[];
   settings: BettingSettingsV2;
   players: Player[];
   holes: Hole[];
@@ -133,16 +139,64 @@ function normalizeHolePars(
   });
 }
 
-function createHoles(holeCount: 9 | 18, pars: Array<3 | 4 | 5>): Hole[] {
+function createHoles(
+  holeCount: 9 | 18,
+  pars: Array<3 | 4 | 5>,
+  handicapRanks: Array<number | null>
+): Hole[] {
   const normalizedPars = normalizeHolePars(pars, holeCount);
+  const normalizedHandicapRanks = normalizeHoleHandicapRanks(
+    handicapRanks,
+    holeCount
+  );
 
   return Array.from({ length: holeCount }, (_, index) => ({
     id: `h${index + 1}`,
     holeNumber: index + 1,
     par: normalizedPars[index],
-    handicapRank: null,
+    handicapRank: normalizedHandicapRanks[index],
   }));
 }
+
+const createDefaultHoleHandicapRanks = (
+  holeCount: 9 | 18
+): Array<number | null> => Array.from({ length: holeCount }, () => null);
+
+const normalizeHoleHandicapRanks = (
+  ranks: Array<number | null | undefined>,
+  holeCount: 9 | 18
+): Array<number | null> =>
+  Array.from({ length: holeCount }, (_, index) => {
+    const rank = ranks[index];
+
+    if (
+      typeof rank === "number" &&
+      Number.isInteger(rank) &&
+      rank >= 1 &&
+      rank <= holeCount
+    ) {
+      return rank;
+    }
+
+    return null;
+  });
+
+const createDefaultPlayerHandicap = (): PlayerHandicapSettings => ({
+  enabled: false,
+  parValues: [],
+  topHandicapHoleCount: 0,
+});
+
+const createDefaultPlayerHandicaps = (): PlayerHandicapSettings[] =>
+  DEFAULT_PLAYER_NAMES.map(() => createDefaultPlayerHandicap());
+
+const normalizePlayerHandicap = (
+  handicap: PlayerHandicapSettings | null | undefined
+): PlayerHandicapSettings => ({
+  enabled: handicap?.enabled ?? false,
+  parValues: Array.isArray(handicap?.parValues) ? handicap.parValues : [],
+  topHandicapHoleCount: handicap?.topHandicapHoleCount ?? 0,
+});
 
 function parseParValuesFromText(text: string): Array<3 | 4 | 5> {
   const normalizedText = text
@@ -661,7 +715,17 @@ export default function Home() {
     "기본 홀별 Par가 들어가 있습니다. 필요하면 직접 수정하거나 텍스트/음성으로 입력하세요."
   );
   const [isListeningPars, setIsListeningPars] = useState(false);
+
+  const [holeHandicapRanks, setHoleHandicapRanks] = useState<Array<number | null>>(
+    () => createDefaultHoleHandicapRanks(9)
+  );
+
   const [playerNames, setPlayerNames] = useState(DEFAULT_PLAYER_NAMES);
+
+  const [playerHandicaps, setPlayerHandicaps] = useState<
+    PlayerHandicapSettings[]
+  >(() => createDefaultPlayerHandicaps());
+
   const [settings, setSettings] = useState<BettingSettingsV2>(() =>
     activateMode(getInitialSettings(), "skins")
   );
@@ -696,14 +760,50 @@ export default function Home() {
         savedHoleCount
       );
       setHolePars(nextHolePars);
-      setParInputText(formatParsForText(nextHolePars));
-      setPlayerNames(
+      setParInputText(formatParsForText(nextHolePars));      
+
+
+      const nextHoleHandicapRanks = normalizeHoleHandicapRanks(
+        Array.isArray(saved.holeHandicapRanks)
+          ? saved.holeHandicapRanks
+          : Array.isArray(saved.holes)
+            ? saved.holes.map((hole) => hole.handicapRank ?? null)
+            : [],
+        savedHoleCount
+      );
+
+      setHoleHandicapRanks(nextHoleHandicapRanks);
+
+      const nextPlayerNames =
         Array.isArray(saved.playerNames) && saved.playerNames.length > 0
           ? saved.playerNames.slice(0, 4)
-          : DEFAULT_PLAYER_NAMES
+          : DEFAULT_PLAYER_NAMES;
+
+      setPlayerNames(nextPlayerNames);
+
+      setPlayerHandicaps(
+        nextPlayerNames.map((_, index) =>
+          normalizePlayerHandicap(
+            Array.isArray(saved.playerHandicaps)
+              ? saved.playerHandicaps[index]
+              : Array.isArray(saved.players)
+                ? saved.players[index]?.handicap
+                : null
+          )
+        )
       );
+
       setSettings(ensureSettingsShape(saved.settings));
-      setPlayers(Array.isArray(saved.players) ? saved.players : []);
+
+      setPlayers(
+        Array.isArray(saved.players)
+          ? saved.players.map((player) => ({
+              ...player,
+              handicap: normalizePlayerHandicap(player.handicap),
+            }))
+          : []
+      );
+
       setHoles(
         Array.isArray(saved.holes)
           ? saved.holes.map((hole) => ({
@@ -746,7 +846,9 @@ export default function Home() {
       courseName,
       holeCount,
       holePars,
+      holeHandicapRanks,
       playerNames,
+      playerHandicaps,
       settings,
       players,
       holes,
@@ -827,6 +929,46 @@ export default function Home() {
     );
   }
 
+  function updateHoleHandicapRank(index: number, handicapRank: number | null) {
+    setHoleHandicapRanks((prev) => {
+      const nextRanks = normalizeHoleHandicapRanks(prev, holeCount);
+      nextRanks[index] = handicapRank;
+      return nextRanks;
+    });
+  }
+
+  const updatePlayerHandicap = (
+    playerIndex: number,
+    updater: (handicap: PlayerHandicapSettings) => PlayerHandicapSettings
+  ) => {
+    setPlayerHandicaps((prev) =>
+      DEFAULT_PLAYER_NAMES.map((_, index) =>
+        index === playerIndex
+          ? updater(normalizePlayerHandicap(prev[index]))
+          : normalizePlayerHandicap(prev[index])
+      )
+    );
+  };
+
+  const togglePlayerHandicapParValue = (
+    playerIndex: number,
+    parValue: HandicapParValue
+  ) => {
+    updatePlayerHandicap(playerIndex, (handicap) => {
+      const hasParValue = handicap.parValues.includes(parValue);
+
+      return {
+        ...handicap,
+        parValues: hasParValue
+          ? handicap.parValues.filter((value) => value !== parValue)
+          : ([...handicap.parValues, parValue] as HandicapParValue[]).sort(
+              (a, b) => a - b
+            ),
+      };
+    });
+  };
+
+
   function updateHoleCount(nextHoleCount: 9 | 18) {
     setHoleCount(nextHoleCount);
     setHolePars((prev) => {
@@ -834,6 +976,9 @@ export default function Home() {
       setParInputText(formatParsForText(nextPars));
       return nextPars;
     });
+    setHoleHandicapRanks((prev) =>
+      normalizeHoleHandicapRanks(prev, nextHoleCount)
+    );
   }
 
   function updateHolePar(index: number, par: 3 | 4 | 5) {
@@ -1011,8 +1156,11 @@ export default function Home() {
       id: `p${index + 1}`,
       name,
       order: index + 1,
+      handicap: normalizePlayerHandicap(playerHandicaps[index]),
     }));
-    const nextHoles = createHoles(holeCount, holePars);
+
+    const nextHoles = createHoles(holeCount, holePars, holeHandicapRanks);
+
     const nextScores = createInitialScores(nextPlayers, nextHoles);
 
     setPlayers(nextPlayers);
@@ -1039,6 +1187,8 @@ export default function Home() {
     setParHelperMessage("기본 홀별 Par가 들어가 있습니다. 필요하면 직접 수정하거나 텍스트/음성으로 입력하세요.");
     setIsListeningPars(false);
     setPlayerNames(DEFAULT_PLAYER_NAMES);
+    setHoleHandicapRanks(createDefaultHoleHandicapRanks(9));
+    setPlayerHandicaps(createDefaultPlayerHandicaps());
     setSettings(activateMode(getInitialSettings(), "skins"));
     setPlayers([]);
     setHoles([]);
@@ -1309,6 +1459,23 @@ function saveCurrentHoleAndGoNext() {
                       <option value={4}>Par 4</option>
                       <option value={5}>Par 5</option>
                     </select>
+
+                    <input
+                      type="number"
+                      min={1}
+                      max={holeCount}
+                      value={holeHandicapRanks[index] ?? ""}
+                      onChange={(event) => {
+                        const value = event.target.value;
+
+                        updateHoleHandicapRank(
+                          index,
+                          value === "" ? null : Number(value)
+                        );
+                      }}
+                      className="mt-2 w-full rounded-lg border border-neutral-200 px-2 py-2 text-xs outline-none"
+                      placeholder="HCP"
+                    />
                   </div>
                 ))}
               </div>
@@ -1361,15 +1528,90 @@ function saveCurrentHoleAndGoNext() {
             <p className="mt-1 text-sm text-neutral-500">최소 2명, 최대 4명</p>
 
             <div className="mt-4 space-y-3">
-              {playerNames.map((name, index) => (
-                <input
-                  key={index}
-                  className="w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
-                  value={name}
-                  onChange={(event) => updatePlayerName(index, event.target.value)}
-                  placeholder={`플레이어 ${index + 1}`}
-                />
-              ))}
+              {playerNames.map((name, index) => {
+                const handicap = normalizePlayerHandicap(playerHandicaps[index]);
+
+                return (
+                  <div key={index} className="rounded-2xl border border-neutral-200 p-3">
+                    <input
+                      className="w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
+                      value={name}
+                      onChange={(event) => updatePlayerName(index, event.target.value)}
+                      placeholder={`플레이어 ${index + 1}`}
+                    />
+
+                    <div className="mt-3 rounded-2xl bg-neutral-50 p-3">
+                      <label className="flex items-center gap-2 text-sm font-bold">
+                        <input
+                          type="checkbox"
+                          checked={handicap.enabled}
+                          onChange={(event) =>
+                            updatePlayerHandicap(index, (prev) => ({
+                              ...prev,
+                              enabled: event.target.checked,
+                            }))
+                          }
+                        />
+                        핸디 적용
+                      </label>
+
+                      {handicap.enabled && (
+                        <div className="mt-3 space-y-3">
+                          <div>
+                            <p className="text-xs font-semibold text-neutral-500">
+                              Par 기준 핸디
+                            </p>
+                            <div className="mt-2 grid grid-cols-3 gap-2">
+                              {([3, 4, 5] as HandicapParValue[]).map((parValue) => (
+                                <button
+                                  key={parValue}
+                                  type="button"
+                                  className={`rounded-xl px-3 py-2 text-sm font-bold ${
+                                    handicap.parValues.includes(parValue)
+                                      ? "bg-blue-700 text-white"
+                                      : "bg-white text-neutral-700"
+                                  }`}
+                                  onClick={() =>
+                                    togglePlayerHandicapParValue(index, parValue)
+                                  }
+                                >
+                                  Par {parValue}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-neutral-500">
+                              핸디캡 상위 n개 홀
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={holeCount}
+                              value={handicap.topHandicapHoleCount || ""}
+                              onChange={(event) => {
+                                const value = event.target.value;
+
+                                updatePlayerHandicap(index, (prev) => ({
+                                  ...prev,
+                                  topHandicapHoleCount:
+                                    value === "" ? 0 : Math.max(0, Number(value)),
+                                }));
+                              }}
+                              className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm"
+                              placeholder="예: 3"
+                            />
+                            <p className="mt-1 text-xs text-neutral-400">
+                              예: 3 입력 시 핸디캡 순번 1~3번 홀에서 1타 차감
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
 
