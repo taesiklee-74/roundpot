@@ -20,6 +20,8 @@ import NearWinnerSelector from "./components/NearWinnerSelector";
 import {
   getHandicapScoreAdjustmentsForHole,
   getHandicapStrokeForHole,
+  getHandicapEligiblePlayersForHole,
+  type HandicapEligiblePlayerForHole,
   type HandicapParValue,
   type HandicapScoreAdjustment,
   type PlayerHandicapSettings,
@@ -2184,6 +2186,12 @@ function saveCurrentHoleAndGoNext() {
     scores,
   });
 
+  const currentHandicapEligiblePlayers: HandicapEligiblePlayerForHole[] =
+  getHandicapEligiblePlayersForHole({
+    players,
+    hole: currentHole,
+  });
+
   return (
     <main className="min-h-screen bg-neutral-100 p-4 text-neutral-900">
       <div className="mx-auto max-w-md space-y-4">
@@ -2275,6 +2283,7 @@ function saveCurrentHoleAndGoNext() {
           formatTeam={formatTeam}
           getPlayerName={getPlayerName}
           handicapAdjustments={currentHandicapAdjustments}
+          handicapEligiblePlayers={currentHandicapEligiblePlayers}
         />
 
 {vegasDrawAnimation && (

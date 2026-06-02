@@ -134,3 +134,66 @@ export function getHandicapScoreAdjustmentsForHole(params: {
     })
     .filter((item): item is HandicapScoreAdjustment => item !== null);
 }
+
+export type HandicapEligiblePlayerForHole = {
+  playerId: string;
+  holeId: string;
+  holeNumber: number;
+  handicapStroke: number;
+  reasons: string[];
+};
+
+export function getHandicapEligiblePlayersForHole(params: {
+  players: Array<{
+    id: string;
+    handicap?: PlayerHandicapSettings | null;
+  }>;
+  hole: {
+    id: string;
+    holeNumber: number;
+    par: number;
+    handicapRank?: number | null;
+  };
+}): HandicapEligiblePlayerForHole[] {
+  const { players, hole } = params;
+
+  return players
+    .map((player) => {
+      const handicap = player.handicap;
+
+      if (!handicap?.enabled) {
+        return null;
+      }
+
+      const reasons: string[] = [];
+
+      if (
+        (hole.par === 3 || hole.par === 4 || hole.par === 5) &&
+        handicap.parValues.includes(hole.par)
+      ) {
+        reasons.push(`Par ${hole.par}`);
+      }
+
+      if (
+        typeof hole.handicapRank === "number" &&
+        handicap.topHandicapHoleCount > 0 &&
+        hole.handicapRank >= 1 &&
+        hole.handicapRank <= handicap.topHandicapHoleCount
+      ) {
+        reasons.push(`HCP ${hole.handicapRank}`);
+      }
+
+      if (reasons.length === 0) {
+        return null;
+      }
+
+      return {
+        playerId: player.id,
+        holeId: hole.id,
+        holeNumber: hole.holeNumber,
+        handicapStroke: 1,
+        reasons,
+      };
+    })
+    .filter((item): item is HandicapEligiblePlayerForHole => item !== null);
+}

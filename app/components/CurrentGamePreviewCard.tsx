@@ -1,7 +1,10 @@
 "use client";
 
 import type { CurrentGamePreview, Player } from "../../src/lib/betting/types";
-import type { HandicapScoreAdjustment } from "../../src/lib/betting/handicap";
+import type {
+  HandicapEligiblePlayerForHole,
+  HandicapScoreAdjustment,
+} from "../../src/lib/betting/handicap";
 
 type CurrentGamePreviewCardProps = {
   preview: CurrentGamePreview | null;
@@ -10,6 +13,7 @@ type CurrentGamePreviewCardProps = {
   formatTeam: (players: Player[], playerIds: string[]) => string;
   getPlayerName: (players: Player[], playerId: string) => string;
   handicapAdjustments: HandicapScoreAdjustment[];
+  handicapEligiblePlayers: HandicapEligiblePlayerForHole[];
 };
 
 function formatScoreToParForDisplay(scoreToPar: number): string {
@@ -27,6 +31,7 @@ export default function CurrentGamePreviewCard({
   formatTeam,
   getPlayerName,
   handicapAdjustments,
+  handicapEligiblePlayers,
 }: CurrentGamePreviewCardProps) {
   if (!preview) {
     return null;
@@ -66,6 +71,38 @@ export default function CurrentGamePreviewCard({
                   <p className="mt-1 text-xs text-neutral-500">
                     원 스코어 {formatScoreToParForDisplay(adjustment.rawScoreToPar)}
                     에서 핸디 {adjustment.handicapStroke}타 차감
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {handicapEligiblePlayers.length > 0 && (
+          <div className="mt-4 rounded-2xl bg-amber-50 p-4">
+            <h3 className="text-sm font-bold text-amber-900">
+              이번 홀 핸디 대상
+            </h3>
+            <p className="mt-1 text-xs text-amber-800">
+              아래 플레이어는 이번 홀 내기 계산에서 1타 차감됩니다.
+            </p>
+
+            <div className="mt-3 space-y-2">
+              {handicapEligiblePlayers.map((item) => (
+                <div
+                  key={`${item.holeId}-${item.playerId}`}
+                  className="rounded-xl bg-white p-3 text-sm"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-semibold">
+                      {getPlayerName(players, item.playerId)}
+                    </span>
+                    <span className="font-bold text-amber-800">
+                      -{item.handicapStroke}타
+                    </span>
+                  </div>
+
+                  <p className="mt-1 text-xs text-neutral-500">
+                    적용 조건: {item.reasons.join(", ")}
                   </p>
                 </div>
               ))}
