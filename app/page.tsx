@@ -17,6 +17,8 @@ import ScorecardSection from "./components/ScorecardSection";
 import CurrentGamePreviewCard from "./components/CurrentGamePreviewCard";
 import LatestResultSection from "./components/LatestResultSection";
 import NearWinnerSelector from "./components/NearWinnerSelector";
+import RoundShareCard from "./components/RoundShareCard";
+import { buildRoundSummaryText } from "../src/lib/share/roundSummary";
 import {
   getHandicapScoreAdjustmentsForHole,
   getHandicapStrokeForHole,
@@ -759,6 +761,25 @@ function getActiveCalculation(params: {
   };
 }
 
+function getGameModeLabel(mode: BettingMode): string {
+  switch (mode) {
+    case "stroke":
+      return "스트로크";
+    case "skins":
+      return "스킨스";
+    case "vegas":
+      return "라스베가스";
+    case "hussein":
+      return "후세인";
+    case "school":
+      return "학교";
+    case "cycle":
+      return "순환게임";
+    default:
+      return mode;
+  }
+}
+
 export default function Home() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -981,6 +1002,31 @@ export default function Home() {
     }),
   [players, nearEnabled, nearAmount, nearResults, vegasTeamAssignments]
   );
+
+  const roundSummaryText =
+    settlementSummary === null
+      ? ""
+      : buildRoundSummaryText({
+          courseName,
+          gameModeLabel: getGameModeLabel(settings.mode),
+          holeCount,
+          players: settlementSummary.players.map((summary) => {
+            const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
+            const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
+
+            return {
+              playerId: summary.playerId,
+              playerName: summary.playerName,
+              totalAmount: summary.totalPrizeAmount + nearTotalAmount,
+            };
+          }),
+          nearPlayers: nearSettlementSummary.players.map((summary) => ({
+            playerId: summary.playerId,
+            playerName: getPlayerName(players, summary.playerId),
+            totalAmount: summary.totalAmount,
+            breakdowns: summary.breakdowns,
+          })),
+        });
 
   const currentHole = holes[currentHoleIndex];
 
@@ -2477,6 +2523,16 @@ function saveCurrentHoleAndGoNext() {
             })}
           </div>
         </section>
+
+        {roundSummaryText && <RoundShareCard summaryText={roundSummaryText} />}
+
+        {nearSettlementSummary.players.some(
+          (summary) => summary.totalAmount !== 0
+        ) && (
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            ...
+          </section>
+        )}
 
         {nearSettlementSummary.players.some(
           (summary) => summary.totalAmount !== 0
