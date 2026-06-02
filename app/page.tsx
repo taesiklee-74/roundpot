@@ -576,13 +576,13 @@ function getActiveCalculation(params: {
     const gameResult = calculateStrokeGameResult({
       players,
       holes,
-      scores,
+      scores: bettingScores,
       settings: strokeSettings,
     });
     const latestResult = getLatestStrokeResult({
       players,
       holes,
-      scores,
+      scores: bettingScores,
       settings: strokeSettings,
     });
 
@@ -591,7 +591,7 @@ function getActiveCalculation(params: {
       currentGamePreview: getStrokeCurrentGamePreview({
         players,
         holes,
-        scores,
+        scores: bettingScores,
         settings: strokeSettings,
       }),
       latestResult,
@@ -605,7 +605,7 @@ function getActiveCalculation(params: {
     const gameResult = calculateSkinsBet({
       players,
       holes,
-      scores,
+      scores: bettingScores,
       settings: skinsSettings,
     });
 
@@ -614,7 +614,7 @@ function getActiveCalculation(params: {
       currentGamePreview: getSkinsCurrentGamePreview({
         players,
         holes,
-        scores,
+        scores: bettingScores,
         settings: skinsSettings,
       }),
       latestResult: getLatestGameResult({ skins: gameResult }),
@@ -633,7 +633,7 @@ function getActiveCalculation(params: {
     const gameResult = calculateVegasBet({
       players,
       holes,
-      scores,
+      scores: bettingScores,
       settings: vegasSettings,
       teamAssignments: vegasTeamAssignments,
     });
@@ -643,7 +643,7 @@ function getActiveCalculation(params: {
       currentGamePreview: getVegasCurrentGamePreview({
         players,
         holes,
-        scores,
+        scores: bettingScores,
         settings: vegasSettings,
         teamAssignments: vegasTeamAssignments,
       }),
@@ -663,7 +663,7 @@ function getActiveCalculation(params: {
     const gameResult = calculateHusseinBet({
       players,
       holes,
-      scores,
+      scores: bettingScores,
       settings: husseinSettings,
       husseinAssignments,
     });
@@ -673,7 +673,7 @@ function getActiveCalculation(params: {
       currentGamePreview: getHusseinCurrentGamePreview({
         players,
         holes,
-        scores,
+        scores: bettingScores,
         settings: husseinSettings,
         husseinAssignments,
       }),
@@ -693,7 +693,7 @@ function getActiveCalculation(params: {
     const gameResult = calculateSchoolBet({
       players,
       holes,
-      scores,
+      scores: bettingScores,
       settings: schoolSettings,
     });
 
@@ -702,7 +702,7 @@ function getActiveCalculation(params: {
       currentGamePreview: getSchoolCurrentGamePreview({
         players,
         holes,
-        scores,
+        scores: bettingScores,
         settings: schoolSettings,
       }),
       latestResult: getLatestGameResult({ school: gameResult }),
@@ -720,7 +720,7 @@ function getActiveCalculation(params: {
   const gameResult = calculateCycleBet({
     players,
     holes,
-    scores,
+    scores: bettingScores,
     settings: cycleSettings,
     vegasTeamAssignments,
     husseinAssignments,
@@ -731,7 +731,7 @@ function getActiveCalculation(params: {
     currentGamePreview: getCycleCurrentGamePreview({
       players,
       holes,
-      scores,
+      scores: bettingScores,
       settings: cycleSettings,
       vegasTeamAssignments,
       husseinAssignments,
@@ -1309,6 +1309,12 @@ function saveCurrentHoleAndGoNext() {
     };
   });
 
+  const nextBettingScores = getBettingScoresWithHandicap({
+    players,
+    holes,
+    scores: nextScores,
+  });
+
   function finishSave() {
     setScores(nextScores);
 
@@ -1328,7 +1334,7 @@ function saveCurrentHoleAndGoNext() {
       settings: { ...settings.vegas, enabled: true },
       teamAssignments: vegasTeamAssignments,
     });
-
+    
     const addAssignment = () => {
       setVegasTeamAssignments((prev) => {
         if (prev.some((item) => item.holeId === assignment.holeId)) return prev;
