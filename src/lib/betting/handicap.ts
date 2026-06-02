@@ -69,3 +69,68 @@ export function getHandicapDescription(params: {
 
   return `${parts.join(", ")}에서 1타 차감`;
 }
+
+export type HandicapScoreAdjustment = {
+  playerId: string;
+  holeId: string;
+  holeNumber: number;
+  rawStrokes: number;
+  adjustedStrokes: number;
+  rawScoreToPar: number;
+  adjustedScoreToPar: number;
+  handicapStroke: number;
+};
+
+export function getHandicapScoreAdjustmentsForHole(params: {
+  players: Array<{
+    id: string;
+    handicap?: PlayerHandicapSettings | null;
+  }>;
+  hole: {
+    id: string;
+    holeNumber: number;
+    par: number;
+    handicapRank?: number | null;
+  };
+  scores: Array<{
+    playerId: string;
+    holeId: string;
+    strokes: number | null;
+  }>;
+}): HandicapScoreAdjustment[] {
+  const { players, hole, scores } = params;
+
+  return players
+    .map((player) => {
+      const score = scores.find(
+        (item) => item.playerId === player.id && item.holeId === hole.id
+      );
+
+      if (!score || score.strokes === null) {
+        return null;
+      }
+
+      const handicapStroke = getHandicapStrokeForHole({
+        handicap: player.handicap,
+        hole,
+      });
+
+      if (handicapStroke <= 0) {
+        return null;
+      }
+
+      const adjustedStrokes = Math.max(1, score.strokes - handicapStroke);
+
+      return {
+        playerId: player.id,
+        holeId: hole.id,
+        holeNumber: hole.holeNumber,
+        rawStrokes: score.strokes,
+        adjustedStrokes,
+        rawScoreToPar: score.strokes - hole.par,
+        adjustedScoreToPar: adjustedStrokes - hole.par,
+        handicapStroke,
+      };
+    })
+    .filter((item): item is HandicapScoreAdjustment => item !== null);
+}

@@ -18,8 +18,10 @@ import CurrentGamePreviewCard from "./components/CurrentGamePreviewCard";
 import LatestResultSection from "./components/LatestResultSection";
 import NearWinnerSelector from "./components/NearWinnerSelector";
 import {
+  getHandicapScoreAdjustmentsForHole,
   getHandicapStrokeForHole,
   type HandicapParValue,
+  type HandicapScoreAdjustment,
   type PlayerHandicapSettings,
 } from "../src/lib/betting/handicap";
 import {
@@ -2138,7 +2140,26 @@ function saveCurrentHoleAndGoNext() {
 
   const currentHoleSaved = isHoleSaved(players, scores, currentHole.id);
   const preview = activeCalculation.currentGamePreview;
-  const latestResult = activeCalculation.latestResult;
+  const latestResult = activeCalculation?.latestResult ?? null;
+  const latestHandicapAdjustments = useMemo<HandicapScoreAdjustment[]>(() => {
+    if (!latestResult) {
+      return [];
+    }
+
+    const latestHole = holes.find(
+      (hole) => hole.holeNumber === latestResult.holeNumber
+    );
+
+    if (!latestHole) {
+      return [];
+    }
+
+    return getHandicapScoreAdjustmentsForHole({
+      players,
+      hole: latestHole,
+      scores,
+    });
+  }, [latestResult, holes, players, scores]);
 
   return (
     <main className="min-h-screen bg-neutral-100 p-4 text-neutral-900">
@@ -2278,6 +2299,8 @@ function saveCurrentHoleAndGoNext() {
   formatTeam={formatTeam}
   formatPlainAmount={formatPlainAmount}
   getPlayerName={getPlayerName}
+  handicapAdjustments={latestHandicapAdjustments}
+
 />
 
         <section className="rounded-2xl bg-white p-5 shadow-sm">
