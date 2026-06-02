@@ -17,9 +17,10 @@ import ScorecardSection from "./components/ScorecardSection";
 import CurrentGamePreviewCard from "./components/CurrentGamePreviewCard";
 import LatestResultSection from "./components/LatestResultSection";
 import NearWinnerSelector from "./components/NearWinnerSelector";
-import type {
-  HandicapParValue,
-  PlayerHandicapSettings,
+import {
+  getHandicapStrokeForHole,
+  type HandicapParValue,
+  type PlayerHandicapSettings,
 } from "../src/lib/betting/handicap";
 import {
   DEFAULT_BETTING_SETTINGS,
@@ -325,6 +326,44 @@ function getPlayerScoreTotalToPar(params: {
   return hasAnySavedScore ? total : null;
 }
 
+function getBettingScoresWithHandicap(params: {
+  players: Player[];
+  holes: Hole[];
+  scores: Score[];
+}): Score[] {
+  const { players, holes, scores } = params;
+
+  const playerById = new Map(players.map((player) => [player.id, player]));
+  const holeById = new Map(holes.map((hole) => [hole.id, hole]));
+
+  return scores.map((score) => {
+    if (score.strokes === null || score.strokes === undefined) {
+      return score;
+    }
+
+    const player = playerById.get(score.playerId);
+    const hole = holeById.get(score.holeId);
+
+    if (!player || !hole) {
+      return score;
+    }
+
+    const handicapStroke = getHandicapStrokeForHole({
+      handicap: player.handicap,
+      hole,
+    });
+
+    if (handicapStroke <= 0) {
+      return score;
+    }
+
+    return {
+      ...score,
+      strokes: Math.max(1, score.strokes - handicapStroke),
+    };
+  });
+}
+
 function isHoleSaved(players: Player[], scores: Score[], holeId: string) {
   return players.every((player) => {
     const score = getScoreObject(scores, holeId, player.id);
@@ -518,12 +557,18 @@ function getActiveCalculation(params: {
 
   if (players.length === 0 || holes.length === 0) return null;
 
+  const bettingScores = getBettingScoresWithHandicap({
+  players,
+  holes,
+  scores,
+});
+
   if (settings.mode === "stroke") {
     const strokeSettings = { ...settings.stroke, enabled: true };
     const strokeBet = calculateStrokeBet({
       players,
       holes,
-      scores,
+      scores: bettingScores,
       settings: strokeSettings,
     });
     const gameResult = calculateStrokeGameResult({
@@ -864,7 +909,7 @@ export default function Home() {
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     setLastSavedAt(savedAt);
-    }, [
+     }, [
     isLoaded,
     hasStarted,
     courseName,
@@ -883,7 +928,7 @@ export default function Home() {
     nearEnabled,
     nearAmount,
     nearResults,
-  ]);
+    ]);
 
   const activeCalculation = useMemo(
     () =>
@@ -932,18 +977,18 @@ export default function Home() {
   }
 
   function updateHoleHandicapRank(index: number, handicapRank: number | null) {
-    setHoleHandicapRanks((prev) => {
-      const nextRanks = normalizeHoleHandicapRanks(prev, holeCount);
+  setHoleHandicapRanks((prev) => {
+    const nextRanks = normalizeHoleHandicapRanks(prev, holeCount);
 
-      nextRanks[index] =
-        typeof handicapRank === "number" &&
-        Number.isInteger(handicapRank) &&
-        handicapRank >= 1 &&
-        handicapRank <= holeCount
-          ? handicapRank
-          : null;
+    nextRanks[index] =
+      typeof handicapRank === "number" &&
+      Number.isInteger(handicapRank) &&
+      handicapRank >= 1 &&
+      handicapRank <= holeCount
+        ? handicapRank
+        : null;
 
-      return nextRanks;
+    return nextRanks;
     });
   }
 
