@@ -355,6 +355,16 @@ function getBettingScoresWithHandicap(params: {
       hole,
     });
 
+    console.log("HANDICAP CHECK", {
+  player: player.name,
+  holeNumber: hole.holeNumber,
+  par: hole.par,
+  handicapRank: hole.handicapRank,
+  handicap: player.handicap,
+  rawStrokes: score.strokes,
+  handicapStroke,
+  adjustedStrokes: Math.max(1, score.strokes - handicapStroke),
+});
     if (handicapStroke <= 0) {
       return score;
     }
@@ -2167,6 +2177,13 @@ function saveCurrentHoleAndGoNext() {
   const currentHoleSaved = isHoleSaved(players, scores, currentHole.id);
   const preview = activeCalculation.currentGamePreview;
 
+  const currentHandicapAdjustments: HandicapScoreAdjustment[] =
+  getHandicapScoreAdjustmentsForHole({
+    players,
+    hole: currentHole,
+    scores,
+  });
+
   return (
     <main className="min-h-screen bg-neutral-100 p-4 text-neutral-900">
       <div className="mx-auto max-w-md space-y-4">
@@ -2257,6 +2274,7 @@ function saveCurrentHoleAndGoNext() {
           formatPlainAmount={formatPlainAmount}
           formatTeam={formatTeam}
           getPlayerName={getPlayerName}
+          handicapAdjustments={currentHandicapAdjustments}
         />
 
 {vegasDrawAnimation && (
