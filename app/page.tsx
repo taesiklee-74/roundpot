@@ -119,6 +119,14 @@ type SavedRoundState = {
   savedAt: string;
 };
 
+type RoundView =
+  | "play"
+  | "latest-result"
+  | "settlement"
+  | "scorecard"
+  | "pool"
+  | "final-share";
+
 type ActiveCalculation = {
   gameResult: GameResult;
   currentGamePreview: CurrentGamePreview | null;
@@ -814,6 +822,7 @@ export default function Home() {
   const [holes, setHoles] = useState<Hole[]>([]);
   const [scores, setScores] = useState<Score[]>([]);
   const [currentHoleIndex, setCurrentHoleIndex] = useState(0);
+  const [roundView, setRoundView] = useState<RoundView>("play");
   const [vegasTeamAssignments, setVegasTeamAssignments] = useState<TeamAssignment[]>([]);
   const [husseinAssignments, setHusseinAssignments] = useState<HusseinAssignment[]>([]);
   const [vegasDrawAnimation, setVegasDrawAnimation] = useState<VegasDrawAnimation | null>(null);
@@ -1286,6 +1295,7 @@ export default function Home() {
     setNearResults([]);
     setVegasDrawAnimation(null);
     setCurrentHoleIndex(0);
+    setRoundView("play");
     setHasStarted(true);
   }
 
@@ -1309,6 +1319,7 @@ export default function Home() {
     setHoles([]);
     setScores([]);
     setCurrentHoleIndex(0);
+    setRoundView("play");
     setVegasTeamAssignments([]);
     setHusseinAssignments([]);
     setNearEnabled(false);
@@ -1354,10 +1365,9 @@ export default function Home() {
 );
 }
 
-function saveCurrentHoleAndGoNext() {
+function saveCurrentHoleAndShowResult() {
   if (!currentHole) return;
 
-  const holeIndex = currentHoleIndex;
   const nextScores = scores.map((score) => {
     if (score.holeId !== currentHole.id) return score;
 
@@ -1367,20 +1377,9 @@ function saveCurrentHoleAndGoNext() {
     };
   });
 
-  const nextBettingScores = getBettingScoresWithHandicap({
-    players,
-    holes,
-    scores: nextScores,
-  });
-
   function finishSave() {
     setScores(nextScores);
-
-    if (holeIndex < holes.length - 1) {
-      setCurrentHoleIndex(holeIndex + 1);
-    } else {
-      alert("마지막 홀까지 저장했습니다. 최종 결과를 확인하세요.");
-    }
+    setRoundView("latest-result");
   }
 
   if (settings.mode === "vegas") {
@@ -1422,11 +1421,7 @@ function saveCurrentHoleAndGoNext() {
 
         window.setTimeout(() => {
           setVegasDrawAnimation(null);
-          if (holeIndex < holes.length - 1) {
-            setCurrentHoleIndex(holeIndex + 1);
-          } else {
-            alert("마지막 홀까지 저장했습니다. 최종 결과를 확인하세요.");
-          }
+          setRoundView("latest-result");
         }, 1200);
       }, 1300);
 
@@ -1456,6 +1451,13 @@ function saveCurrentHoleAndGoNext() {
 
   finishSave();
 }
+
+  function goToNextHoleFromResult() {
+    if (currentHoleIndex < holes.length - 1) {
+      setCurrentHoleIndex((value) => value + 1);
+    }
+    setRoundView("play");
+  }
 
   function formatSavedTime(value: string | null) {
     if (!value) return "아직 저장 전";
@@ -2238,6 +2240,194 @@ function saveCurrentHoleAndGoNext() {
     hole: currentHole,
   });
 
+  const isLastHole = currentHoleIndex >= holes.length - 1;
+  const showPrizePool =
+    Boolean(activeCalculation.poolSummary) || nearSettlementSummary.totalPool > 0;
+
+  const roundViewTitle: Record<RoundView, string> = {
+    play: `${getModeLabel(settings.mode)} 진행 중`,
+    "latest-result": "방금 홀 결과",
+    settlement: "현재 상금",
+    scorecard: "전체 스코어카드",
+    pool: "상금 풀",
+    "final-share": "최종 정산",
+  };
+
+  const returnToPlayButton = (
+    <button
+      type="button"
+      className="w-full rounded-2xl bg-neutral-200 px-5 py-4 text-base font-semibold text-neutral-900"
+      onClick={() => setRoundView("play")}
+    >
+      라운드로 돌아가기
+    </button>
+  );
+
+  const currentPrizeSection = (
+    <section className="rounded-2xl bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-bold">현재 상금 누적 수령액</h2>
+      <p className="mt-1 text-sm text-neutral-500">
+        사전 모금형 게임은 현재까지 실제로 받은 상금 기준입니다.
+      </p>
+
+      <div className="mt-3 space-y-2">
+        {settlementSummary.players.map((summary) => {
+          const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
+          const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
+          const totalAmountWithNear = summary.totalPrizeAmount + nearTotalAmount;
+
+          return (
+            <div key={summary.playerId} className="rounded-xl bg-neutral-50 p-3">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">{summary.playerName}</span>
+                <span className="font-bold text-blue-600">
+                  {formatAmount(totalAmountWithNear)}
+                </span>
+              </div>
+
+              <p className="mt-1 text-xs text-neutral-500">
+                {formatPrizeBreakdown(summary)}
+              </p>
+
+              {nearTotalAmount !== 0 && (
+                <p className="mt-1 text-xs text-lime-700">
+                  니어 정산: {formatAmount(nearTotalAmount)}
+                </p>
+              )}
+
+              <p className="mt-1 text-xs text-neutral-400">
+                {formatSettlementReference(summary)}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+
+  const nearSettlementSection =
+    nearSettlementSummary.players.some((summary) => summary.totalAmount !== 0) ? (
+      <section className="rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold">니어 정산</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          파3 니어 결과가 반영된 별도 정산입니다.
+        </p>
+
+        <div className="mt-3 space-y-2">
+          {nearSettlementSummary.players
+            .filter((summary) => summary.totalAmount !== 0)
+            .map((summary) => (
+              <div key={summary.playerId} className="rounded-xl bg-lime-50 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">
+                    {getPlayerName(players, summary.playerId)}
+                  </span>
+                  <span className="font-bold text-lime-700">
+                    {formatAmount(summary.totalAmount)}
+                  </span>
+                </div>
+
+                {summary.breakdowns.length > 0 && (
+                  <p className="mt-1 text-xs text-lime-800">
+                    {summary.breakdowns.join(" · ")}
+                  </p>
+                )}
+              </div>
+            ))}
+        </div>
+      </section>
+    ) : null;
+
+  const strokeSettlementSection =
+    settings.mode === "stroke" && settlementSummary.pairwiseSettlements.length > 0 ? (
+      <section className="rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold">스트로크 지급 내역</h2>
+        <div className="mt-3 space-y-2 text-sm">
+          {settlementSummary.pairwiseSettlements.map((item, index) => (
+            <div key={index} className="rounded-xl bg-neutral-50 p-3">
+              <p>
+                {getPlayerName(players, item.fromPlayerId)} →{" "}
+                {getPlayerName(players, item.toPlayerId)}
+              </p>
+              <p className="font-semibold">{formatPlainAmount(item.amount)}</p>
+              <p className="text-xs text-neutral-500">{item.reason}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    ) : null;
+
+  const prizePoolSection = showPrizePool ? (
+    <section className="rounded-2xl bg-neutral-900 p-5 text-white shadow-sm">
+      <h2 className="text-lg font-bold">상금 풀</h2>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div className="rounded-xl bg-white/15 p-3">
+          <p className="opacity-80">사전 총액</p>
+          <p className="text-lg font-bold">
+            {formatPlainAmount(
+              (activeCalculation.poolSummary?.totalPool ?? 0) +
+                nearSettlementSummary.totalPool
+            )}
+          </p>
+        </div>
+        <div className="rounded-xl bg-white/15 p-3">
+          <p className="opacity-80">1인 선납</p>
+          <p className="text-lg font-bold">
+            {formatPlainAmount(
+              (activeCalculation.poolSummary?.contributionPerPlayer ?? 0) +
+                nearSettlementSummary.contributionPerPlayer
+            )}
+          </p>
+        </div>
+        <div className="rounded-xl bg-white/15 p-3">
+          <p className="opacity-80">지급 완료</p>
+          <p className="text-lg font-bold">
+            {formatPlainAmount(
+              (activeCalculation.poolSummary?.poolPaid ?? 0) +
+                nearSettlementSummary.paidAmount
+            )}
+          </p>
+        </div>
+        <div className="rounded-xl bg-white/15 p-3">
+          <p className="opacity-80">현재 이월</p>
+          <p className="text-lg font-bold">
+            {formatPlainAmount(
+              (activeCalculation.poolSummary?.remainingCarryOver ?? 0) +
+                nearSettlementSummary.remainingPool
+            )}
+          </p>
+        </div>
+      </div>
+      {settings.mode === "school" && activeCalculation.poolSummary?.schoolLabel && (
+        <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
+          <p className="font-semibold">
+            학교 상태: {activeCalculation.poolSummary.schoolLabel}
+          </p>
+          <p>
+            1등 상금 이월:{" "}
+            {formatPlainAmount(activeCalculation.poolSummary.firstPrizeCarryOver ?? 0)}
+          </p>
+          <p>
+            2등 상금 이월:{" "}
+            {formatPlainAmount(activeCalculation.poolSummary.secondPrizeCarryOver ?? 0)}
+          </p>
+        </div>
+      )}
+      {nearSettlementSummary.totalPool > 0 && (
+        <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
+          <p className="font-semibold">니어 사전 모금</p>
+          <p>니어 총액: {formatPlainAmount(nearSettlementSummary.totalPool)}</p>
+          <p>
+            1인 추가 선납:{" "}
+            {formatPlainAmount(nearSettlementSummary.contributionPerPlayer)}
+          </p>
+          <p>니어 지급 완료: {formatPlainAmount(nearSettlementSummary.paidAmount)}</p>
+          <p>니어 남은 팟: {formatPlainAmount(nearSettlementSummary.remainingPool)}</p>
+        </div>
+      )}
+    </section>
+  ) : null;
+
   return (
     <main className="min-h-screen bg-neutral-100 p-4 text-neutral-900">
       <div className="mx-auto max-w-md space-y-4">
@@ -2245,10 +2435,12 @@ function saveCurrentHoleAndGoNext() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm text-neutral-500">{courseName || "라운드팟"}</p>
-              <h1 className="text-2xl font-bold">{getModeLabel(settings.mode)} 진행 중</h1>
-              <p className="mt-2 text-sm text-neutral-600">
-                각 홀은 Par 기준 0, +1, -1 방식으로 입력합니다.
-              </p>
+              <h1 className="text-2xl font-bold">{roundViewTitle[roundView]}</h1>
+              {roundView === "play" && (
+                <p className="mt-2 text-sm text-neutral-600">
+                  각 홀은 Par 기준 0, +1, -1 방식으로 입력합니다.
+                </p>
+              )}
               <p className="mt-3 text-xs text-neutral-400">
                 자동 저장: {formatSavedTime(lastSavedAt)}
               </p>
@@ -2262,6 +2454,8 @@ function saveCurrentHoleAndGoNext() {
           </div>
         </header>
 
+        {roundView === "play" && (
+          <>
         <CurrentGamePreviewCard
           preview={preview}
           players={players}
@@ -2310,17 +2504,6 @@ function saveCurrentHoleAndGoNext() {
     )}
   </section>
 )}
-
-<LatestResultSection
-  latestResult={latestResult}
-  settings={settings}
-  players={players}
-  formatTeam={formatTeam}
-  formatPlainAmount={formatPlainAmount}
-  getPlayerName={getPlayerName}
-  handicapAdjustments={latestHandicapAdjustments}
-
-/>
 
         <section className="rounded-2xl bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
@@ -2415,178 +2598,116 @@ function saveCurrentHoleAndGoNext() {
           })()}
 
           <button
+            type="button"
             className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-bold text-white shadow-sm"
-            onClick={saveCurrentHoleAndGoNext}
+            onClick={saveCurrentHoleAndShowResult}
           >
-            {currentHoleIndex === holes.length - 1
-              ? "현재 홀 저장하고 결과 확인"
-              : "현재 홀 저장하고 다음 홀"}
+            현재 홀 저장하고 결과 확인
           </button>
         </section>
 
         <section className="rounded-2xl bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-bold">현재 상금 누적 수령액</h2>
-          <p className="mt-1 text-sm text-neutral-500">
-            사전 모금형 게임은 현재까지 실제로 받은 상금 기준입니다.
-          </p>
-
+          <h2 className="text-sm font-semibold text-neutral-500">보조 화면</h2>
           <div className="mt-3 space-y-2">
-            {settlementSummary.players.map((summary) => {
-              const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
-              const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
-              const totalAmountWithNear = summary.totalPrizeAmount + nearTotalAmount;
-
-              return (
-                <div key={summary.playerId} className="rounded-xl bg-neutral-50 p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">{summary.playerName}</span>
-                    <span className="font-bold text-blue-600">
-                      {formatAmount(totalAmountWithNear)}
-                    </span>
-                  </div>
-
-                  <p className="mt-1 text-xs text-neutral-500">
-                    {formatPrizeBreakdown(summary)}
-                  </p>
-
-                  {nearTotalAmount !== 0 && (
-                    <p className="mt-1 text-xs text-lime-700">
-                      니어 정산: {formatAmount(nearTotalAmount)}
-                    </p>
-                  )}
-
-                  <p className="mt-1 text-xs text-neutral-400">
-                    {formatSettlementReference(summary)}
-                  </p>
-                </div>
-              );
-            })}
+            <button
+              type="button"
+              className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
+              onClick={() => setRoundView("settlement")}
+            >
+              현재 상금 보기
+            </button>
+            <button
+              type="button"
+              className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
+              onClick={() => setRoundView("scorecard")}
+            >
+              전체 스코어카드 보기
+            </button>
+            {showPrizePool && (
+              <button
+                type="button"
+                className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
+                onClick={() => setRoundView("pool")}
+              >
+                상금 풀 보기
+              </button>
+            )}
           </div>
         </section>
-
-        {nearSettlementSummary.players.some(
-          (summary) => summary.totalAmount !== 0
-        ) && (
-          <section className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold">니어 정산</h2>
-            <p className="mt-1 text-sm text-neutral-500">
-              파3 니어 결과가 반영된 별도 정산입니다.
-            </p>
-
-            <div className="mt-3 space-y-2">
-              {nearSettlementSummary.players
-                .filter((summary) => summary.totalAmount !== 0)
-                .map((summary) => (
-                  <div key={summary.playerId} className="rounded-xl bg-lime-50 p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">
-                        {getPlayerName(players, summary.playerId)}
-                      </span>
-                      <span className="font-bold text-lime-700">
-                        {formatAmount(summary.totalAmount)}
-                      </span>
-                    </div>
-
-                    {summary.breakdowns.length > 0 && (
-                      <p className="mt-1 text-xs text-lime-800">
-                        {summary.breakdowns.join(" · ")}
-                      </p>
-                    )}
-                  </div>
-                ))}
-            </div>
-          </section>
+          </>
         )}
 
-        {settings.mode === "stroke" && settlementSummary.pairwiseSettlements.length > 0 && (
-          <section className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold">스트로크 지급 내역</h2>
-            <div className="mt-3 space-y-2 text-sm">
-              {settlementSummary.pairwiseSettlements.map((item, index) => (
-                <div key={index} className="rounded-xl bg-neutral-50 p-3">
-                  <p>
-                    {getPlayerName(players, item.fromPlayerId)} → {getPlayerName(players, item.toPlayerId)}
-                  </p>
-                  <p className="font-semibold">{formatPlainAmount(item.amount)}</p>
-                  <p className="text-xs text-neutral-500">{item.reason}</p>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+        {roundView === "latest-result" && (
+          <>
+            <LatestResultSection
+              latestResult={latestResult}
+              settings={settings}
+              players={players}
+              formatTeam={formatTeam}
+              formatPlainAmount={formatPlainAmount}
+              getPlayerName={getPlayerName}
+              handicapAdjustments={latestHandicapAdjustments}
+            />
 
-      <ScorecardSection
-        players={players}
-        holes={holes}
-        scores={scores}
-        holeCount={holeCount}
-        getSavedScoreToPar={getSavedScoreToPar}
-        getPlayerScoreTotalToPar={getPlayerScoreTotalToPar}
-        formatScoreToPar={formatScoreToPar}
-      />
-
-        {(activeCalculation.poolSummary || nearSettlementSummary.totalPool > 0) && (
-          <section className="rounded-2xl bg-neutral-900 p-5 text-white shadow-sm">
-            <h2 className="text-lg font-bold">상금 풀</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-xl bg-white/15 p-3">
-                <p className="opacity-80">사전 총액</p>
-                <p className="text-lg font-bold">
-                  {formatPlainAmount(
-                    (activeCalculation.poolSummary?.totalPool ?? 0) +
-                      nearSettlementSummary.totalPool
-                  )}
-                </p>
-              </div>
-              <div className="rounded-xl bg-white/15 p-3">
-                <p className="opacity-80">1인 선납</p>
-                <p className="text-lg font-bold">
-                  {formatPlainAmount(
-                    (activeCalculation.poolSummary?.contributionPerPlayer ?? 0) +
-                      nearSettlementSummary.contributionPerPlayer
-                  )}
-                </p>
-              </div>
-              <div className="rounded-xl bg-white/15 p-3">
-                <p className="opacity-80">지급 완료</p>
-                <p className="text-lg font-bold">
-                  {formatPlainAmount(
-                    (activeCalculation.poolSummary?.poolPaid ?? 0) +
-                      nearSettlementSummary.paidAmount
-                  )}
-                </p>
-              </div>
-              <div className="rounded-xl bg-white/15 p-3">
-                <p className="opacity-80">현재 이월</p>
-                <p className="text-lg font-bold">
-                  {formatPlainAmount(
-                    (activeCalculation.poolSummary?.remainingCarryOver ?? 0) +
-                      nearSettlementSummary.remainingPool
-                  )}
-                </p>
-              </div>
-            </div>
-            {settings.mode === "school" &&
-              activeCalculation.poolSummary?.schoolLabel && (
-              <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-                <p className="font-semibold">학교 상태: {activeCalculation.poolSummary.schoolLabel}</p>
-                <p>1등 상금 이월: {formatPlainAmount(activeCalculation.poolSummary.firstPrizeCarryOver ?? 0)}</p>
-                <p>2등 상금 이월: {formatPlainAmount(activeCalculation.poolSummary.secondPrizeCarryOver ?? 0)}</p>
-              </div>
+            {isLastHole ? (
+              <button
+                type="button"
+                className="w-full rounded-2xl bg-neutral-900 px-5 py-4 text-base font-bold text-white shadow-sm"
+                onClick={() => setRoundView("final-share")}
+              >
+                최종 정산 보기
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-bold text-white shadow-sm"
+                onClick={goToNextHoleFromResult}
+              >
+                다음 홀로
+              </button>
             )}
-            {nearSettlementSummary.totalPool > 0 && (
-              <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-                <p className="font-semibold">니어 사전 모금</p>
-                <p>니어 총액: {formatPlainAmount(nearSettlementSummary.totalPool)}</p>
-                <p>1인 추가 선납: {formatPlainAmount(nearSettlementSummary.contributionPerPlayer)}</p>
-                <p>니어 지급 완료: {formatPlainAmount(nearSettlementSummary.paidAmount)}</p>
-                <p>니어 남은 팟: {formatPlainAmount(nearSettlementSummary.remainingPool)}</p>
-              </div>
-            )}
-          </section>
+          </>
         )}
 
-        {roundSummaryText && <RoundShareCard summaryText={roundSummaryText} />}
+        {roundView === "settlement" && (
+          <>
+            {returnToPlayButton}
+            {currentPrizeSection}
+            {nearSettlementSection}
+          </>
+        )}
+
+        {roundView === "scorecard" && (
+          <>
+            {returnToPlayButton}
+            <ScorecardSection
+              players={players}
+              holes={holes}
+              scores={scores}
+              holeCount={holeCount}
+              getSavedScoreToPar={getSavedScoreToPar}
+              getPlayerScoreTotalToPar={getPlayerScoreTotalToPar}
+              formatScoreToPar={formatScoreToPar}
+            />
+          </>
+        )}
+
+        {roundView === "pool" && (
+          <>
+            {returnToPlayButton}
+            {prizePoolSection}
+          </>
+        )}
+
+        {roundView === "final-share" && (
+          <>
+            {currentPrizeSection}
+            {nearSettlementSection}
+            {strokeSettlementSection}
+            {roundSummaryText && <RoundShareCard summaryText={roundSummaryText} />}
+            {returnToPlayButton}
+          </>
+        )}
       </div>
     </main>
   );
