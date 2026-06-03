@@ -2464,8 +2464,6 @@ function saveCurrentHoleAndGoNext() {
           </div>
         </section>
 
-        {roundSummaryText && <RoundShareCard summaryText={roundSummaryText} />}
-
         {nearSettlementSummary.players.some(
           (summary) => summary.totalAmount !== 0
         ) && (
@@ -2587,6 +2585,8 @@ function saveCurrentHoleAndGoNext() {
             )}
           </section>
         )}
+
+        {roundSummaryText && <RoundShareCard summaryText={roundSummaryText} />}
       </div>
     </main>
   );
