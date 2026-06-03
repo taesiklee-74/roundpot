@@ -2262,66 +2262,6 @@ function saveCurrentHoleAndGoNext() {
           </div>
         </header>
 
-        {(activeCalculation.poolSummary || nearSettlementSummary.totalPool > 0) && (          <section className="rounded-2xl bg-neutral-900 p-5 text-white shadow-sm">
-            <h2 className="text-lg font-bold">상금 풀</h2>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-              <div className="rounded-xl bg-white/15 p-3">
-                <p className="opacity-80">사전 총액</p>
-                <p className="text-lg font-bold">
-                  {formatPlainAmount(
-                    (activeCalculation.poolSummary?.totalPool ?? 0) +
-                      nearSettlementSummary.totalPool
-                  )}
-                </p>
-              </div>
-              <div className="rounded-xl bg-white/15 p-3">
-                <p className="opacity-80">1인 선납</p>
-                <p className="text-lg font-bold">
-                  {formatPlainAmount(
-                    (activeCalculation.poolSummary?.contributionPerPlayer ?? 0) +
-                      nearSettlementSummary.contributionPerPlayer
-                  )}
-                </p>
-              </div>
-              <div className="rounded-xl bg-white/15 p-3">
-                <p className="opacity-80">지급 완료</p>
-                <p className="text-lg font-bold">
-                  {formatPlainAmount(
-                    (activeCalculation.poolSummary?.poolPaid ?? 0) +
-                      nearSettlementSummary.paidAmount
-                  )}
-                </p>
-              </div>
-              <div className="rounded-xl bg-white/15 p-3">
-                <p className="opacity-80">현재 이월</p>
-                <p className="text-lg font-bold">
-                  {formatPlainAmount(
-                    (activeCalculation.poolSummary?.remainingCarryOver ?? 0) +
-                      nearSettlementSummary.remainingPool
-                  )}
-                </p>
-              </div>
-            </div>
-            {settings.mode === "school" &&
-              activeCalculation.poolSummary?.schoolLabel && (
-              <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-                <p className="font-semibold">학교 상태: {activeCalculation.poolSummary.schoolLabel}</p>
-                <p>1등 상금 이월: {formatPlainAmount(activeCalculation.poolSummary.firstPrizeCarryOver ?? 0)}</p>
-                <p>2등 상금 이월: {formatPlainAmount(activeCalculation.poolSummary.secondPrizeCarryOver ?? 0)}</p>
-              </div>
-            )}
-            {nearSettlementSummary.totalPool > 0 && (
-              <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-                <p className="font-semibold">니어 사전 모금</p>
-                <p>니어 총액: {formatPlainAmount(nearSettlementSummary.totalPool)}</p>
-                <p>1인 추가 선납: {formatPlainAmount(nearSettlementSummary.contributionPerPlayer)}</p>
-                <p>니어 지급 완료: {formatPlainAmount(nearSettlementSummary.paidAmount)}</p>
-                <p>니어 남은 팟: {formatPlainAmount(nearSettlementSummary.remainingPool)}</p>
-              </div>
-            )}
-          </section>
-        )}
-
         <CurrentGamePreviewCard
           preview={preview}
           players={players}
@@ -2530,14 +2470,6 @@ function saveCurrentHoleAndGoNext() {
           (summary) => summary.totalAmount !== 0
         ) && (
           <section className="rounded-2xl bg-white p-5 shadow-sm">
-            ...
-          </section>
-        )}
-
-        {nearSettlementSummary.players.some(
-          (summary) => summary.totalAmount !== 0
-        ) && (
-          <section className="rounded-2xl bg-white p-5 shadow-sm">
             <h2 className="text-lg font-bold">니어 정산</h2>
             <p className="mt-1 text-sm text-neutral-500">
               파3 니어 결과가 반영된 별도 정산입니다.
@@ -2594,6 +2526,67 @@ function saveCurrentHoleAndGoNext() {
         getPlayerScoreTotalToPar={getPlayerScoreTotalToPar}
         formatScoreToPar={formatScoreToPar}
       />
+
+        {(activeCalculation.poolSummary || nearSettlementSummary.totalPool > 0) && (
+          <section className="rounded-2xl bg-neutral-900 p-5 text-white shadow-sm">
+            <h2 className="text-lg font-bold">상금 풀</h2>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <div className="rounded-xl bg-white/15 p-3">
+                <p className="opacity-80">사전 총액</p>
+                <p className="text-lg font-bold">
+                  {formatPlainAmount(
+                    (activeCalculation.poolSummary?.totalPool ?? 0) +
+                      nearSettlementSummary.totalPool
+                  )}
+                </p>
+              </div>
+              <div className="rounded-xl bg-white/15 p-3">
+                <p className="opacity-80">1인 선납</p>
+                <p className="text-lg font-bold">
+                  {formatPlainAmount(
+                    (activeCalculation.poolSummary?.contributionPerPlayer ?? 0) +
+                      nearSettlementSummary.contributionPerPlayer
+                  )}
+                </p>
+              </div>
+              <div className="rounded-xl bg-white/15 p-3">
+                <p className="opacity-80">지급 완료</p>
+                <p className="text-lg font-bold">
+                  {formatPlainAmount(
+                    (activeCalculation.poolSummary?.poolPaid ?? 0) +
+                      nearSettlementSummary.paidAmount
+                  )}
+                </p>
+              </div>
+              <div className="rounded-xl bg-white/15 p-3">
+                <p className="opacity-80">현재 이월</p>
+                <p className="text-lg font-bold">
+                  {formatPlainAmount(
+                    (activeCalculation.poolSummary?.remainingCarryOver ?? 0) +
+                      nearSettlementSummary.remainingPool
+                  )}
+                </p>
+              </div>
+            </div>
+            {settings.mode === "school" &&
+              activeCalculation.poolSummary?.schoolLabel && (
+              <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
+                <p className="font-semibold">학교 상태: {activeCalculation.poolSummary.schoolLabel}</p>
+                <p>1등 상금 이월: {formatPlainAmount(activeCalculation.poolSummary.firstPrizeCarryOver ?? 0)}</p>
+                <p>2등 상금 이월: {formatPlainAmount(activeCalculation.poolSummary.secondPrizeCarryOver ?? 0)}</p>
+              </div>
+            )}
+            {nearSettlementSummary.totalPool > 0 && (
+              <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
+                <p className="font-semibold">니어 사전 모금</p>
+                <p>니어 총액: {formatPlainAmount(nearSettlementSummary.totalPool)}</p>
+                <p>1인 추가 선납: {formatPlainAmount(nearSettlementSummary.contributionPerPlayer)}</p>
+                <p>니어 지급 완료: {formatPlainAmount(nearSettlementSummary.paidAmount)}</p>
+                <p>니어 남은 팟: {formatPlainAmount(nearSettlementSummary.remainingPool)}</p>
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </main>
   );
