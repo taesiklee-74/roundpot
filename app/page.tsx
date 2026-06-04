@@ -2572,6 +2572,16 @@ function saveCurrentHoleAndShowResult() {
   </section>
 )}
 
+        <CurrentGamePreviewCard
+          preview={preview}
+          players={players}
+          formatPlainAmount={formatPlainAmount}
+          formatTeam={formatTeam}
+          getPlayerName={getPlayerName}
+          handicapAdjustments={currentHandicapAdjustments}
+          handicapEligiblePlayers={currentHandicapEligiblePlayers}
+        />
+
         <section className="rounded-2xl bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -2665,16 +2675,6 @@ function saveCurrentHoleAndShowResult() {
           })()}
 
         </section>
-
-        <CurrentGamePreviewCard
-          preview={preview}
-          players={players}
-          formatPlainAmount={formatPlainAmount}
-          formatTeam={formatTeam}
-          getPlayerName={getPlayerName}
-          handicapAdjustments={currentHandicapAdjustments}
-          handicapEligiblePlayers={currentHandicapEligiblePlayers}
-        />
 
         <button
           type="button"
