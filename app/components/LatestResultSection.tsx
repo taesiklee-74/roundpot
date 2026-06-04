@@ -149,7 +149,7 @@ export default function LatestResultSection({
   const latestNearWinnerPlayerId = nearResult?.winnerPlayerId ?? null;
 
   return (
-    <section className="rounded-2xl bg-white p-5 shadow-sm">
+    <section className="rounded-2xl bg-amber-50 p-5 shadow-sm">
       <h2 className="text-lg font-bold">방금 홀 결과</h2>
 
       {nearResult && latestNearWinnerPlayerId && (
