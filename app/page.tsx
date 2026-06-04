@@ -1542,16 +1542,8 @@ function saveCurrentHoleAndShowResult() {
       return null;
     }
 
-    const latestHole = holes.find(
-      (hole) => hole.holeNumber === latestResult.holeNumber
-    );
-
-    if (!latestHole || latestHole.par !== 3) {
-      return null;
-    }
-
-    return getNearResultForHole(nearResults, latestHole.id);
-  }, [latestResult, nearEnabled, holes, nearResults]);
+    return getNearResultForHole(nearResults, latestResult.holeId);
+  }, [latestResult, nearEnabled, nearResults]);
 
   if (!isLoaded) {
     return (
