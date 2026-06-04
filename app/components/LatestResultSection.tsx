@@ -8,6 +8,7 @@ import type {
 } from "../../src/lib/betting/types";
 
 import type { HandicapScoreAdjustment } from "../../src/lib/betting/handicap";
+import type { NearResult } from "../../src/lib/betting/near";
 
 type SchoolLatestResultDisplay = {
   firstPrizeAmount?: number;
@@ -67,6 +68,7 @@ type LatestResultSectionProps = {
   formatPlainAmount: (amount: number) => string;
   getPlayerName: (players: Player[], playerId: string) => string;
   handicapAdjustments: HandicapScoreAdjustment[];
+  nearResult: NearResult | null;
 };
 
 function isSkinsDisplayResult(
@@ -138,14 +140,36 @@ export default function LatestResultSection({
   formatPlainAmount,
   getPlayerName,
   handicapAdjustments,
+  nearResult,
 }: LatestResultSectionProps) {
   if (!latestResult) {
     return null;
   }
 
+  const latestNearWinnerPlayerId = nearResult?.winnerPlayerId ?? null;
+
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm">
       <h2 className="text-lg font-bold">방금 홀 결과</h2>
+
+      {nearResult && latestNearWinnerPlayerId && (
+        <div className="mt-3 rounded-2xl bg-lime-50 p-4">
+          <p className="text-sm font-bold text-lime-700">니어 위너</p>
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <p className="text-xl font-black text-lime-950">
+              {getPlayerName(players, latestNearWinnerPlayerId)}
+            </p>
+            <p className="text-lg font-black text-lime-700">
+              {formatPlainAmount(nearResult.amount)}
+            </p>
+          </div>
+          <p className="mt-1 text-xs text-lime-800">
+            {nearResult.gameKind === "vegas"
+              ? "라스베가스 팀 니어 기준으로 정산됩니다."
+              : "파3 니어 보너스가 정산에 반영됩니다."}
+          </p>
+        </div>
+      )}
 
       {settings.mode === "school" ? (
         (() => {

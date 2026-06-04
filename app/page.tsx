@@ -1537,6 +1537,21 @@ function saveCurrentHoleAndShowResult() {
       scores,
     });
   }, [latestResult, holes, players, scores]);
+  const latestNearResult = useMemo(() => {
+    if (!latestResult || !nearEnabled) {
+      return null;
+    }
+
+    const latestHole = holes.find(
+      (hole) => hole.holeNumber === latestResult.holeNumber
+    );
+
+    if (!latestHole || latestHole.par !== 3) {
+      return null;
+    }
+
+    return getNearResultForHole(nearResults, latestHole.id);
+  }, [latestResult, nearEnabled, holes, nearResults]);
 
   if (!isLoaded) {
     return (
@@ -2691,6 +2706,7 @@ function saveCurrentHoleAndShowResult() {
               formatPlainAmount={formatPlainAmount}
               getPlayerName={getPlayerName}
               handicapAdjustments={latestHandicapAdjustments}
+              nearResult={latestNearResult}
             />
 
             {currentPrizeSection}
