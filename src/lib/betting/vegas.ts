@@ -314,6 +314,7 @@ function createHoleResult(params: {
     winnerType: "none",
     winnerPlayerIds: [],
     isCarryOver: carryOverEnabled,
+    tiedPlayerIds: [...teamA.playerIds, ...teamB.playerIds],
     ...extraResultFields,
 
   };

@@ -3,6 +3,7 @@
 import type {
   BettingMode,
   BettingSettingsV2,
+  HoleGameResult,
   Player,
 } from "../../src/lib/betting/types";
 
@@ -13,6 +14,8 @@ type SchoolLatestResultDisplay = {
   secondPrizeAmount?: number;
   firstPrizeWinnerPlayerIds?: string[];
   secondPrizeWinnerPlayerIds?: string[];
+  firstPrizeTiedPlayerIds?: string[];
+  secondPrizeTiedPlayerIds?: string[];
   firstPrizeCarriedIn?: number;
   secondPrizeCarriedIn?: number;
   firstPrizeCarriedOut?: number;
@@ -48,8 +51,16 @@ type SkinsLatestResultDisplay = {
   skinsResultType?: "win" | "tie";
 };
 
+type LatestResultDisplay = HoleGameResult &
+  Partial<
+    SchoolLatestResultDisplay &
+      VegasLatestResultDisplay &
+      HusseinLatestResultDisplay &
+      SkinsLatestResultDisplay
+  >;
+
 type LatestResultSectionProps = {
-  latestResult: any | null;
+  latestResult: LatestResultDisplay | null;
   settings: BettingSettingsV2;
   players: Player[];
   formatTeam: (players: Player[], playerIds: string[]) => string;
@@ -60,21 +71,21 @@ type LatestResultSectionProps = {
 
 function isSkinsDisplayResult(
   mode: BettingMode,
-  result: { gameType: string; title: string } & SkinsLatestResultDisplay,
+  result: LatestResultDisplay,
 ) {
   return mode === "skins" || result.innerGameType === "skins";
 }
 
 function isVegasDisplayResult(
   mode: BettingMode,
-  result: { gameType: string; title: string } & VegasLatestResultDisplay,
+  result: LatestResultDisplay,
 ) {
   return mode === "vegas" || result.innerGameType === "vegas";
 }
 
 function isHusseinDisplayResult(
   mode: BettingMode,
-  result: { gameType: string; title: string } & HusseinLatestResultDisplay,
+  result: LatestResultDisplay,
 ) {
   return mode === "hussein" || result.innerGameType === "hussein";
 }
@@ -107,6 +118,18 @@ function formatScoreToParForDisplay(scoreToPar: number): string {
   return scoreToPar > 0 ? `+${scoreToPar}` : `${scoreToPar}`;
 }
 
+function formatPlayerNames(params: {
+  players: Player[];
+  playerIds: string[];
+  getPlayerName: (players: Player[], playerId: string) => string;
+}): string {
+  const { players, playerIds, getPlayerName } = params;
+
+  return playerIds
+    .map((playerId) => getPlayerName(players, playerId))
+    .join(", ");
+}
+
 export default function LatestResultSection({
   latestResult,
   settings,
@@ -130,6 +153,8 @@ export default function LatestResultSection({
             SchoolLatestResultDisplay;
           const firstWinnerIds = schoolResult.firstPrizeWinnerPlayerIds ?? [];
           const secondWinnerIds = schoolResult.secondPrizeWinnerPlayerIds ?? [];
+          const firstTiedIds = schoolResult.firstPrizeTiedPlayerIds ?? [];
+          const secondTiedIds = schoolResult.secondPrizeTiedPlayerIds ?? [];
           const firstPrizeAmount = schoolResult.firstPrizeAmount ?? 0;
           const secondPrizeAmount = schoolResult.secondPrizeAmount ?? 0;
           const firstCarriedOut = schoolResult.firstPrizeCarriedOut ?? 0;
@@ -170,11 +195,23 @@ export default function LatestResultSection({
                       </p>
                     </div>
                   ) : (
-                    <div className="mt-1 flex items-center justify-between gap-3">
-                      <p className="text-lg font-bold text-neutral-900">이월</p>
-                      <p className="text-lg font-bold text-amber-600">
-                        {firstCarriedOut.toLocaleString()}원
-                      </p>
+                    <div>
+                      <div className="mt-1 flex items-center justify-between gap-3">
+                        <p className="text-lg font-bold text-neutral-900">이월</p>
+                        <p className="text-lg font-bold text-amber-600">
+                          {firstCarriedOut.toLocaleString()}원
+                        </p>
+                      </div>
+                      {firstTiedIds.length > 0 && (
+                        <p className="mt-2 text-sm font-semibold text-amber-700">
+                          동점 이월:{" "}
+                          {formatPlayerNames({
+                            players,
+                            playerIds: firstTiedIds,
+                            getPlayerName,
+                          })}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -193,11 +230,23 @@ export default function LatestResultSection({
                       </p>
                     </div>
                   ) : (
-                    <div className="mt-1 flex items-center justify-between gap-3">
-                      <p className="text-lg font-bold text-neutral-900">이월</p>
-                      <p className="text-lg font-bold text-amber-600">
-                        {secondCarriedOut.toLocaleString()}원
-                      </p>
+                    <div>
+                      <div className="mt-1 flex items-center justify-between gap-3">
+                        <p className="text-lg font-bold text-neutral-900">이월</p>
+                        <p className="text-lg font-bold text-amber-600">
+                          {secondCarriedOut.toLocaleString()}원
+                        </p>
+                      </div>
+                      {secondTiedIds.length > 0 && (
+                        <p className="mt-2 text-sm font-semibold text-amber-700">
+                          동점 이월:{" "}
+                          {formatPlayerNames({
+                            players,
+                            playerIds: secondTiedIds,
+                            getPlayerName,
+                          })}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -244,6 +293,9 @@ export default function LatestResultSection({
               : winnerTeamId === "B"
                 ? teamBPlayerIds
                 : [];
+          const tiedPlayerIds =
+            vegasResult.tiedPlayerIds ??
+            (winnerTeamId ? [] : [...teamAPlayerIds, ...teamBPlayerIds]);
 
           return (
             <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
@@ -292,9 +344,21 @@ export default function LatestResultSection({
                   {formatPlainAmount(latestResult.prizeAmount / 2)}
                 </p>
               ) : (
-                <p className="mt-3 text-sm font-semibold text-amber-700">
-                  동점으로 {formatPlainAmount(latestResult.prizeAmount)} 이월
-                </p>
+                <div className="mt-3 text-sm font-semibold text-amber-700">
+                  <p>
+                    동점으로 {formatPlainAmount(latestResult.prizeAmount)} 이월
+                  </p>
+                  {tiedPlayerIds.length > 0 && (
+                    <p className="mt-1">
+                      동점 이월:{" "}
+                      {formatPlayerNames({
+                        players,
+                        playerIds: tiedPlayerIds,
+                        getPlayerName,
+                      })}
+                    </p>
+                  )}
+                </div>
               )}
 
               {latestResult.detail && (
@@ -330,6 +394,10 @@ export default function LatestResultSection({
               : latestResult.winnerPlayerIds.length > 1
                 ? "rest"
                 : "tie");
+          const tiedPlayerIds =
+            winnerType === "tie"
+              ? husseinResult.tiedPlayerIds ?? [husseinPlayerId, ...restPlayerIds]
+              : [];
 
           const titleText =
             settings.mode === "cycle"
@@ -423,6 +491,17 @@ export default function LatestResultSection({
                   {formatPlainAmount(latestResult.prizeAmount)}
                 </p>
 
+                {winnerType === "tie" && tiedPlayerIds.length > 0 && (
+                  <p className="mt-2 text-sm font-semibold text-amber-700">
+                    동점 이월:{" "}
+                    {formatPlayerNames({
+                      players,
+                      playerIds: tiedPlayerIds,
+                      getPlayerName,
+                    })}
+                  </p>
+                )}
+
                 {winnerType !== "tie" && (
                   <p className="mt-2 text-sm font-semibold text-blue-700">
                     수령: {formatTeam(players, latestResult.winnerPlayerIds)}
@@ -456,10 +535,15 @@ export default function LatestResultSection({
           const skinsResult = latestResult as typeof latestResult &
             SkinsLatestResultDisplay;
           const skinsPlayerIds =
-            skinsResult.skinsPlayerIds ?? latestResult.winnerPlayerIds;
+            skinsResult.skinsPlayerIds ??
+            latestResult.tiedPlayerIds ??
+            latestResult.winnerPlayerIds;
           const isWin =
             skinsResult.skinsResultType === "win" ||
             latestResult.winnerPlayerIds.length === 1;
+          const tiedPlayerIds = isWin
+            ? []
+            : skinsResult.tiedPlayerIds ?? skinsPlayerIds;
           const scoreText =
             skinsResult.skinsScore !== null &&
             skinsResult.skinsScore !== undefined
@@ -506,6 +590,17 @@ export default function LatestResultSection({
                 </p>
               </div>
 
+              {!isWin && tiedPlayerIds.length > 0 && (
+                <p className="mt-3 text-sm font-semibold text-amber-700">
+                  동점 이월:{" "}
+                  {formatPlayerNames({
+                    players,
+                    playerIds: tiedPlayerIds,
+                    getPlayerName,
+                  })}
+                </p>
+              )}
+
               {latestResult.carriedIn > 0 && (
                 <p className="mt-3 text-xs text-blue-600">
                   이월 포함: {formatPlainAmount(latestResult.carriedIn)} + 기본{" "}
@@ -541,6 +636,18 @@ export default function LatestResultSection({
               {latestResult.detail}
             </p>
           )}
+          {latestResult.isCarryOver &&
+            latestResult.tiedPlayerIds &&
+            latestResult.tiedPlayerIds.length > 0 && (
+              <p className="mt-2 text-sm font-semibold text-amber-700">
+                동점 이월:{" "}
+                {formatPlayerNames({
+                  players,
+                  playerIds: latestResult.tiedPlayerIds,
+                  getPlayerName,
+                })}
+              </p>
+            )}
           {latestResult.winnerPlayerIds.length > 0 &&
             latestResult.prizeAmount > 0 && (
               <p className="mt-2 text-sm font-semibold text-blue-700">

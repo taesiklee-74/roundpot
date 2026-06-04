@@ -158,6 +158,7 @@ export type HoleGameResult = {
   winnerType: WinnerType;
   winnerPlayerIds: ID[];
   isCarryOver: boolean;
+  tiedPlayerIds?: ID[];
 };
 
 export type GameResult = {

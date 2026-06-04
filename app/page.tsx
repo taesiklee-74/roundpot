@@ -2243,6 +2243,8 @@ function saveCurrentHoleAndShowResult() {
   const isLastHole = currentHoleIndex >= holes.length - 1;
   const showPrizePool =
     Boolean(activeCalculation.poolSummary) || nearSettlementSummary.totalPool > 0;
+  const showRoundHeader =
+    roundView !== "play" && roundView !== "latest-result";
 
   const roundViewTitle: Record<RoundView, string> = {
     play: `${getModeLabel(settings.mode)} 진행 중`,
@@ -2301,6 +2303,37 @@ function saveCurrentHoleAndShowResult() {
             </div>
           );
         })}
+      </div>
+    </section>
+  );
+
+  const otherScreensSection = (
+    <section className="rounded-2xl bg-white p-5 shadow-sm">
+      <h2 className="text-sm font-semibold text-neutral-500">다른 화면 보기</h2>
+      <div className="mt-3 space-y-2">
+        <button
+          type="button"
+          className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
+          onClick={() => setRoundView("settlement")}
+        >
+          현재 상금 보기
+        </button>
+        <button
+          type="button"
+          className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
+          onClick={() => setRoundView("scorecard")}
+        >
+          전체 스코어카드 보기
+        </button>
+        {showPrizePool && (
+          <button
+            type="button"
+            className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
+            onClick={() => setRoundView("pool")}
+          >
+            상금 풀 보기
+          </button>
+        )}
       </div>
     </section>
   );
@@ -2431,41 +2464,28 @@ function saveCurrentHoleAndShowResult() {
   return (
     <main className="min-h-screen bg-neutral-100 p-4 text-neutral-900">
       <div className="mx-auto max-w-md space-y-4">
-        <header className="rounded-2xl bg-white p-5 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm text-neutral-500">{courseName || "라운드팟"}</p>
-              <h1 className="text-2xl font-bold">{roundViewTitle[roundView]}</h1>
-              {roundView === "play" && (
-                <p className="mt-2 text-sm text-neutral-600">
-                  각 홀은 Par 기준 0, +1, -1 방식으로 입력합니다.
+        {showRoundHeader && (
+          <header className="rounded-2xl bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm text-neutral-500">{courseName || "라운드팟"}</p>
+                <h1 className="text-2xl font-bold">{roundViewTitle[roundView]}</h1>
+                <p className="mt-3 text-xs text-neutral-400">
+                  자동 저장: {formatSavedTime(lastSavedAt)}
                 </p>
-              )}
-              <p className="mt-3 text-xs text-neutral-400">
-                자동 저장: {formatSavedTime(lastSavedAt)}
-              </p>
+              </div>
+              <button
+                className="rounded-xl bg-neutral-100 px-3 py-2 text-sm font-semibold"
+                onClick={resetRound}
+              >
+                새 라운드
+              </button>
             </div>
-            <button
-              className="rounded-xl bg-neutral-100 px-3 py-2 text-sm font-semibold"
-              onClick={resetRound}
-            >
-              새 라운드
-            </button>
-          </div>
-        </header>
+          </header>
+        )}
 
         {roundView === "play" && (
           <>
-        <CurrentGamePreviewCard
-          preview={preview}
-          players={players}
-          formatPlainAmount={formatPlainAmount}
-          formatTeam={formatTeam}
-          getPlayerName={getPlayerName}
-          handicapAdjustments={currentHandicapAdjustments}
-          handicapEligiblePlayers={currentHandicapEligiblePlayers}
-        />
-
 {vegasDrawAnimation && (
   <section className="rounded-2xl bg-white p-5 shadow-sm">
     <div className="flex items-center justify-between gap-3">
@@ -2597,43 +2617,27 @@ function saveCurrentHoleAndShowResult() {
             );
           })()}
 
-          <button
-            type="button"
-            className="mt-4 w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-bold text-white shadow-sm"
-            onClick={saveCurrentHoleAndShowResult}
-          >
-            현재 홀 저장하고 결과 확인
-          </button>
         </section>
 
-        <section className="rounded-2xl bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-neutral-500">보조 화면</h2>
-          <div className="mt-3 space-y-2">
-            <button
-              type="button"
-              className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
-              onClick={() => setRoundView("settlement")}
-            >
-              현재 상금 보기
-            </button>
-            <button
-              type="button"
-              className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
-              onClick={() => setRoundView("scorecard")}
-            >
-              전체 스코어카드 보기
-            </button>
-            {showPrizePool && (
-              <button
-                type="button"
-                className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
-                onClick={() => setRoundView("pool")}
-              >
-                상금 풀 보기
-              </button>
-            )}
-          </div>
-        </section>
+        <CurrentGamePreviewCard
+          preview={preview}
+          players={players}
+          formatPlainAmount={formatPlainAmount}
+          formatTeam={formatTeam}
+          getPlayerName={getPlayerName}
+          handicapAdjustments={currentHandicapAdjustments}
+          handicapEligiblePlayers={currentHandicapEligiblePlayers}
+        />
+
+        <button
+          type="button"
+          className="w-full rounded-2xl bg-blue-600 px-5 py-4 text-base font-bold text-white shadow-sm"
+          onClick={saveCurrentHoleAndShowResult}
+        >
+          현재 홀 저장하고 결과 확인
+        </button>
+
+        {otherScreensSection}
           </>
         )}
 
@@ -2648,6 +2652,9 @@ function saveCurrentHoleAndShowResult() {
               getPlayerName={getPlayerName}
               handicapAdjustments={latestHandicapAdjustments}
             />
+
+            {currentPrizeSection}
+            {otherScreensSection}
 
             {isLastHole ? (
               <button

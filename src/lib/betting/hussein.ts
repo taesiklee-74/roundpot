@@ -397,6 +397,10 @@ function createHoleResult(params: {
     winnerType: "none",
     winnerPlayerIds: [],
     isCarryOver: carryOverEnabled,
+    tiedPlayerIds: [
+      husseinPlayer.id,
+      ...restPlayers.map((player) => player.id),
+    ],
   };
 }
 

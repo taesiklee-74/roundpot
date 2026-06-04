@@ -70,6 +70,7 @@ function createHoleResult(params: {
   carriedIn: number;
   prizeAmount: number;
   winner: Player | null;
+  tiedPlayerIds: string[];
   bestScore: number | null;
   carryOverEnabled: boolean;
 }): HoleGameResult {
@@ -79,6 +80,7 @@ function createHoleResult(params: {
     carriedIn,
     prizeAmount,
     winner,
+    tiedPlayerIds,
     bestScore,
     carryOverEnabled,
   } = params;
@@ -115,6 +117,7 @@ function createHoleResult(params: {
     winnerType: "none",
     winnerPlayerIds: [],
     isCarryOver: carryOverEnabled,
+    tiedPlayerIds,
   };
 }
 
@@ -153,6 +156,12 @@ export function calculateSkinsBet({
     const prizeAmount = baseAmount + carriedIn;
     const winner = getSkinsWinner(standings);
     const bestScore = standings[0]?.strokes ?? null;
+    const tiedPlayerIds =
+      bestScore === null
+        ? []
+        : standings
+            .filter((standing) => standing.strokes === bestScore)
+            .map((standing) => standing.player.id);
 
     poolCollected += baseAmount;
 
@@ -162,6 +171,7 @@ export function calculateSkinsBet({
       carriedIn,
       prizeAmount,
       winner,
+      tiedPlayerIds,
       bestScore,
       carryOverEnabled: settings.carryOverEnabled,
     });

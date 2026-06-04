@@ -45,6 +45,8 @@ export type SchoolHoleResult = HoleGameResult & {
   secondPrizeAmount: number;
   firstPrizeWinnerPlayerIds: string[];
   secondPrizeWinnerPlayerIds: string[];
+  firstPrizeTiedPlayerIds: string[];
+  secondPrizeTiedPlayerIds: string[];
   firstPrizeCarriedIn: number;
   secondPrizeCarriedIn: number;
   firstPrizeCarriedOut: number;
@@ -163,6 +165,14 @@ function createSchoolHoleResult(params: {
 
   const firstPrizePaid = firstPrizeWinnerPlayerIds.length === 1;
   const secondPrizePaid = secondPrizeWinnerPlayerIds.length === 1;
+  const firstPrizeTiedPlayerIds =
+    !firstPrizePaid && firstGroup && firstGroup.entries.length > 1
+      ? firstGroup.entries.map((entry) => entry.player.id)
+      : [];
+  const secondPrizeTiedPlayerIds =
+    !secondPrizePaid && nextGroup && nextGroup.entries.length > 1
+      ? nextGroup.entries.map((entry) => entry.player.id)
+      : [];
 
   const firstPrizeCarriedOut =
     firstPrizePaid || !settings.carryOverEnabled ? 0 : firstPrizeAmount;
@@ -241,10 +251,15 @@ function createSchoolHoleResult(params: {
     // 일부 지급 + 일부 이월인 경우에는 결과 카드 상단에서 지급액이 보이도록 false로 둔다.
     // 이월 내용은 detail과 상금 풀 카드에서 표시한다.
     isCarryOver: paidAmount === 0 && carriedOutAmount > 0,
+    tiedPlayerIds: [
+      ...new Set([...firstPrizeTiedPlayerIds, ...secondPrizeTiedPlayerIds]),
+    ],
     firstPrizeAmount,
     secondPrizeAmount,
     firstPrizeWinnerPlayerIds,
     secondPrizeWinnerPlayerIds,
+    firstPrizeTiedPlayerIds,
+    secondPrizeTiedPlayerIds,
     firstPrizeCarriedIn,
     secondPrizeCarriedIn,
     firstPrizeCarriedOut,

@@ -266,6 +266,7 @@ function createSkinsHoleResult(params: {
     winnerType: "none",
     winnerPlayerIds: [],
     isCarryOver: true,
+    tiedPlayerIds: skinsPlayerIds,
     innerGameType: "skins",
     skinsPlayerIds,
     skinsScore: bestScore,
@@ -366,6 +367,10 @@ function createHusseinHoleResult(params: {
     winnerType: "none",
     winnerPlayerIds: [],
     isCarryOver: true,
+    tiedPlayerIds: [
+      husseinPlayer.id,
+      ...restPlayers.map((player) => player.id),
+    ],
   };
 }
 
@@ -434,6 +439,7 @@ function createVegasHoleResult(params: {
     winnerType: "none",
     winnerPlayerIds: [],
     isCarryOver: true,
+    tiedPlayerIds: [...teamA.playerIds, ...teamB.playerIds],
   };
 }
 
