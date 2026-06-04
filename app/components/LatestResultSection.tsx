@@ -296,6 +296,20 @@ export default function LatestResultSection({
           const tiedPlayerIds =
             vegasResult.tiedPlayerIds ??
             (winnerTeamId ? [] : [...teamAPlayerIds, ...teamBPlayerIds]);
+          const teamCards = [
+            {
+              id: "A" as const,
+              label: "A팀",
+              playerIds: teamAPlayerIds,
+              score: teamAScore,
+            },
+            {
+              id: "B" as const,
+              label: "B팀",
+              playerIds: teamBPlayerIds,
+              score: teamBScore,
+            },
+          ];
 
           return (
             <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
@@ -313,29 +327,46 @@ export default function LatestResultSection({
                 </p>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div
-                  className={`rounded-2xl p-4 ${winnerTeamId === "A" ? "bg-blue-50" : "bg-white"}`}
-                >
-                  <p className="text-sm font-semibold text-neutral-500">A팀</p>
-                  <p className="mt-1 text-3xl font-black text-neutral-900">
-                    {teamAScore}타
-                  </p>
-                  <p className="mt-2 text-sm text-neutral-600">
-                    {formatTeam(players, teamAPlayerIds)}
-                  </p>
-                </div>
-                <div
-                  className={`rounded-2xl p-4 ${winnerTeamId === "B" ? "bg-blue-50" : "bg-white"}`}
-                >
-                  <p className="text-sm font-semibold text-neutral-500">B팀</p>
-                  <p className="mt-1 text-3xl font-black text-neutral-900">
-                    {teamBScore}타
-                  </p>
-                  <p className="mt-2 text-sm text-neutral-600">
-                    {formatTeam(players, teamBPlayerIds)}
-                  </p>
-                </div>
+              <div className="mt-4 grid grid-cols-1 gap-3">
+                {teamCards.map((team) => {
+                  const isWinner = winnerTeamId === team.id;
+
+                  return (
+                    <div
+                      key={team.id}
+                      className={`rounded-2xl border p-4 ${
+                        isWinner
+                          ? "border-blue-200 bg-blue-50"
+                          : "border-neutral-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-lg font-black text-neutral-900">
+                              {team.label}
+                            </p>
+                            {isWinner && (
+                              <span className="rounded-full bg-blue-600 px-2 py-1 text-xs font-bold text-white">
+                                승리
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-2 text-base font-bold leading-snug text-neutral-800">
+                            {formatTeam(players, team.playerIds)}
+                          </p>
+                        </div>
+                        <p
+                          className={`shrink-0 text-3xl font-black ${
+                            isWinner ? "text-blue-700" : "text-neutral-900"
+                          }`}
+                        >
+                          {team.score}타
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {winnerTeamId ? (

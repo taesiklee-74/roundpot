@@ -395,6 +395,16 @@ function isHoleSaved(players: Player[], scores: Score[], holeId: string) {
   });
 }
 
+function getFirstIncompleteHoleIndex(
+  players: Player[],
+  holes: Hole[],
+  scores: Score[]
+) {
+  const index = holes.findIndex((hole) => !isHoleSaved(players, scores, hole.id));
+
+  return index >= 0 ? index : null;
+}
+
 function getPlayerName(players: Player[], playerId: string) {
   return players.find((player) => player.id === playerId)?.name ?? playerId;
 }
@@ -1464,11 +1474,22 @@ function saveCurrentHoleAndShowResult() {
   finishSave();
 }
 
-  function goToNextHoleFromResult() {
-    if (currentHoleIndex < holes.length - 1) {
-      setCurrentHoleIndex((value) => value + 1);
+  function returnToPlay() {
+    const firstIncompleteHoleIndex = getFirstIncompleteHoleIndex(
+      players,
+      holes,
+      scores
+    );
+
+    if (firstIncompleteHoleIndex !== null) {
+      setCurrentHoleIndex(firstIncompleteHoleIndex);
     }
+
     setRoundView("play");
+  }
+
+  function goToNextHoleFromResult() {
+    returnToPlay();
   }
 
   function formatSavedTime(value: string | null) {
@@ -2271,7 +2292,7 @@ function saveCurrentHoleAndShowResult() {
     <button
       type="button"
       className="w-full rounded-2xl bg-neutral-200 px-5 py-4 text-base font-semibold text-neutral-900"
-      onClick={() => setRoundView("play")}
+      onClick={returnToPlay}
     >
       라운드로 돌아가기
     </button>
