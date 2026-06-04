@@ -974,6 +974,18 @@ export default function Home() {
     nearResults,
     ]);
 
+  useEffect(() => {
+    if (!hasStarted) return;
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo({
+        top: 0,
+        left: 0,
+        behavior: "auto",
+      });
+    });
+  }, [hasStarted, roundView]);
+
   const activeCalculation = useMemo(
     () =>
       getActiveCalculation({
