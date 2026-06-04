@@ -2367,6 +2367,13 @@ function saveCurrentHoleAndShowResult() {
             상금 풀 보기
           </button>
         )}
+        <button
+          type="button"
+          className="w-full rounded-xl bg-red-50 px-4 py-3 text-left text-sm font-semibold text-red-700"
+          onClick={resetRound}
+        >
+          새 라운드로 초기화
+        </button>
       </div>
     </section>
   );
