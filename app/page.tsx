@@ -2804,9 +2804,7 @@ function saveCurrentHoleAndShowResult() {
                   const manualAssignment =
                     getManualVegasTeamAssignmentForHole(currentHole.id);
 
-                  const teamAPlayerIds =
-                    manualAssignment?.teamAPlayerIds ??
-                    players.slice(0, 2).map((player) => player.id);
+                  const teamAPlayerIds = manualAssignment?.teamAPlayerIds ?? [];
 
                   const teamBPlayerIds = players
                     .map((player) => player.id)
