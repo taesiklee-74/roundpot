@@ -113,10 +113,17 @@ type SavedRoundState = {
   currentHoleIndex: number;
   vegasTeamAssignments: TeamAssignment[];
   husseinAssignments: HusseinAssignment[];
+  manualVegasTeamAssignments: ManualVegasTeamAssignment[];
   nearEnabled: boolean;
   nearAmount: number;
   nearResults: NearResult[];
   savedAt: string;
+};
+
+type ManualVegasTeamAssignment = {
+  holeId: string;
+  teamAPlayerIds: string[];
+  teamBPlayerIds: string[];
 };
 
 type RoundView =
@@ -563,7 +570,11 @@ function ensureSettingsShape(settings: BettingSettingsV2 | undefined): BettingSe
       ...settings,
       stroke: { ...defaults.stroke, ...settings.stroke },
       skins: { ...defaults.skins, ...settings.skins },
-      vegas: { ...defaults.vegas, ...settings.vegas },
+      vegas: {
+        ...defaults.vegas,
+        ...settings.vegas,
+        teamAssignmentMode: settings.vegas?.teamAssignmentMode ?? "auto",
+      },
       hussein: { ...defaults.hussein, ...settings.hussein },
       school: { ...defaults.school, ...settings.school },
       cycle: { ...defaults.cycle, ...settings.cycle },
@@ -834,6 +845,9 @@ export default function Home() {
   const [currentHoleIndex, setCurrentHoleIndex] = useState(0);
   const [roundView, setRoundView] = useState<RoundView>("play");
   const [vegasTeamAssignments, setVegasTeamAssignments] = useState<TeamAssignment[]>([]);
+  const [manualVegasTeamAssignments, setManualVegasTeamAssignments] = useState<
+    ManualVegasTeamAssignment[]
+  >([]);
   const [husseinAssignments, setHusseinAssignments] = useState<HusseinAssignment[]>([]);
   const [vegasDrawAnimation, setVegasDrawAnimation] = useState<VegasDrawAnimation | null>(null);
   const [nearEnabled, setNearEnabled] = useState(false);
@@ -918,6 +932,11 @@ export default function Home() {
       setVegasTeamAssignments(
         Array.isArray(saved.vegasTeamAssignments) ? saved.vegasTeamAssignments : []
       );
+      setManualVegasTeamAssignments(
+        Array.isArray(saved.manualVegasTeamAssignments)
+          ? saved.manualVegasTeamAssignments
+          : []
+      );
       setHusseinAssignments(
         Array.isArray(saved.husseinAssignments) ? saved.husseinAssignments : []
       );
@@ -954,6 +973,7 @@ export default function Home() {
       scores,
       currentHoleIndex,
       vegasTeamAssignments,
+      manualVegasTeamAssignments,
       husseinAssignments,
       nearEnabled,
       nearAmount,
@@ -978,6 +998,7 @@ export default function Home() {
     scores,
     currentHoleIndex,
     vegasTeamAssignments,
+    manualVegasTeamAssignments,
     husseinAssignments,
     nearEnabled,
     nearAmount,
@@ -1329,6 +1350,7 @@ export default function Home() {
     setHoles(nextHoles);
     setScores(nextScores);
     setVegasTeamAssignments([]);
+    setManualVegasTeamAssignments([]);
     setHusseinAssignments([]);
     setNearResults([]);
     setVegasDrawAnimation(null);
@@ -1359,6 +1381,7 @@ export default function Home() {
     setCurrentHoleIndex(0);
     setRoundView("play");
     setVegasTeamAssignments([]);
+    setManualVegasTeamAssignments([]);
     setHusseinAssignments([]);
     setNearEnabled(false);
     setNearAmount(5000);
@@ -1403,6 +1426,41 @@ export default function Home() {
 );
 }
 
+function getManualVegasTeamAssignmentForHole(holeId: string) {
+  return (
+    manualVegasTeamAssignments.find(
+      (assignment) => assignment.holeId === holeId
+    ) ?? null
+  );
+}
+
+function updateManualVegasTeamAForHole(holeId: string, teamAPlayerIds: string[]) {
+  const normalizedTeamAPlayerIds = teamAPlayerIds.slice(0, 2);
+  const teamBPlayerIds = players
+    .map((player) => player.id)
+    .filter((playerId) => !normalizedTeamAPlayerIds.includes(playerId));
+
+  setManualVegasTeamAssignments((prev) => {
+    const nextAssignment: ManualVegasTeamAssignment = {
+      holeId,
+      teamAPlayerIds: normalizedTeamAPlayerIds,
+      teamBPlayerIds,
+    };
+
+    const existingIndex = prev.findIndex(
+      (assignment) => assignment.holeId === holeId
+    );
+
+    if (existingIndex === -1) {
+      return [...prev, nextAssignment];
+    }
+
+    return prev.map((assignment, index) =>
+      index === existingIndex ? nextAssignment : assignment
+    );
+  });
+}
+
 function saveCurrentHoleAndShowResult() {
   if (!currentHole) return;
 
@@ -1415,21 +1473,62 @@ function saveCurrentHoleAndShowResult() {
     };
   });
 
+  const nextBettingScores = getBettingScoresWithHandicap({
+    players,
+    holes,
+    scores: nextScores,
+  });
+
   function finishSave() {
     setScores(nextScores);
     setRoundView("latest-result");
   }
 
   if (settings.mode === "vegas") {
-    const assignment = createVegasTeamAssignment({
-      hole: currentHole,
-      players,
-      holes,
-      scores: nextScores,
-      settings: { ...settings.vegas, enabled: true },
-      teamAssignments: vegasTeamAssignments,
-    });
-    
+    const manualAssignment =
+      getManualVegasTeamAssignmentForHole(currentHole.id);
+
+    const shouldUseManualAssignment =
+      settings.vegas.teamAssignmentMode === "manual" &&
+      manualAssignment !== null &&
+      manualAssignment.teamAPlayerIds.length === 2 &&
+      manualAssignment.teamBPlayerIds.length === 2;
+
+    if (
+      settings.vegas.teamAssignmentMode === "manual" &&
+      !shouldUseManualAssignment
+    ) {
+      alert("라스베가스 팀 A를 2명 선택해 주세요.");
+      return;
+    }
+
+    const assignment: TeamAssignment = shouldUseManualAssignment
+      ? {
+          holeId: currentHole.id,
+          holeNumber: currentHole.holeNumber,
+          teams: [
+            {
+              id: "A",
+              name: "팀 A",
+              playerIds: manualAssignment.teamAPlayerIds,
+            },
+            {
+              id: "B",
+              name: "팀 B",
+              playerIds: manualAssignment.teamBPlayerIds,
+            },
+          ],
+          reason: "직접 입력",
+        }
+      : createVegasTeamAssignment({
+          hole: currentHole,
+          players,
+          holes,
+          scores: nextBettingScores,
+          settings: { ...settings.vegas, enabled: true },
+          teamAssignments: vegasTeamAssignments,
+        });
+
     const addAssignment = () => {
       setVegasTeamAssignments((prev) => {
         if (prev.some((item) => item.holeId === assignment.holeId)) return prev;
@@ -1476,7 +1575,7 @@ function saveCurrentHoleAndShowResult() {
       hole: currentHole,
       players,
       holes,
-      scores: nextScores,
+      scores: nextBettingScores,
       settings: { ...settings.hussein, enabled: true },
       husseinAssignments,
     });
@@ -1930,6 +2029,33 @@ function saveCurrentHoleAndShowResult() {
                   >
                     전홀 1·4등 vs 2·3등
                   </button>
+                </div>
+                <div className="mt-4 rounded-xl bg-orange-50 p-3 text-sm text-orange-900">
+                  <p className="font-semibold">팀 입력 방식</p>
+                  <p className="mt-1 text-xs">
+                    자동 배정은 기존 규칙대로 팀을 만들고, 직접 입력은 라운드 중 홀별로 팀을 지정합니다.
+                  </p>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {(["auto", "manual"] as const).map((assignmentMode) => (
+                      <button
+                        key={assignmentMode}
+                        type="button"
+                        className={`rounded-xl px-3 py-2 font-semibold ${
+                          settings.vegas.teamAssignmentMode === assignmentMode
+                            ? "bg-orange-600 text-white"
+                            : "bg-white text-orange-900"
+                        }`}
+                        onClick={() =>
+                          updateSettings("vegas", {
+                            teamAssignmentMode: assignmentMode,
+                          })
+                        }
+                      >
+                        {assignmentMode === "auto" ? "자동 배정" : "직접 입력"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <p className="mt-3">사전 총액: {formatPlainAmount(settings.vegas.amountPerHole * holeCount)}</p>
                 <p>1인 선납 예상: {formatPlainAmount((settings.vegas.amountPerHole * holeCount) / 4)}</p>
@@ -2666,7 +2792,82 @@ function saveCurrentHoleAndShowResult() {
             })}
           </div>
 
-                  
+          {settings.mode === "vegas" &&
+            settings.vegas.teamAssignmentMode === "manual" && (
+              <section className="rounded-2xl bg-orange-50 p-5 shadow-sm">
+                <h2 className="text-lg font-bold text-orange-950">
+                  라스베가스 팀 직접 입력
+                </h2>
+                <p className="mt-1 text-sm text-orange-800">
+                  팀 A 플레이어 2명을 선택하세요. 나머지 2명은 자동으로 팀 B가 됩니다.
+                </p>
+
+                {(() => {
+                  const manualAssignment =
+                    getManualVegasTeamAssignmentForHole(currentHole.id);
+
+                  const teamAPlayerIds =
+                    manualAssignment?.teamAPlayerIds ??
+                    players.slice(0, 2).map((player) => player.id);
+
+                  const teamBPlayerIds = players
+                    .map((player) => player.id)
+                    .filter((playerId) => !teamAPlayerIds.includes(playerId));
+
+                  return (
+                    <>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {players.map((player) => {
+                          const isSelected = teamAPlayerIds.includes(player.id);
+
+                          return (
+                            <button
+                              key={player.id}
+                              type="button"
+                              className={`rounded-xl px-3 py-3 text-sm font-bold ${
+                                isSelected
+                                  ? "bg-orange-700 text-white"
+                                  : "bg-white text-orange-900"
+                              }`}
+                              onClick={() => {
+                                let nextTeamAPlayerIds = teamAPlayerIds;
+
+                                if (isSelected) {
+                                  nextTeamAPlayerIds = teamAPlayerIds.filter(
+                                    (playerId) => playerId !== player.id
+                                  );
+                                } else if (teamAPlayerIds.length < 2) {
+                                  nextTeamAPlayerIds = [...teamAPlayerIds, player.id];
+                                }
+
+                                updateManualVegasTeamAForHole(
+                                  currentHole.id,
+                                  nextTeamAPlayerIds
+                                );
+                              }}
+                            >
+                              {player.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-3 rounded-xl bg-white p-3 text-sm">
+                        <p>
+                          <span className="font-bold">팀 A:</span>{" "}
+                          {formatTeam(players, teamAPlayerIds)}
+                        </p>
+                        <p className="mt-1">
+                          <span className="font-bold">팀 B:</span>{" "}
+                          {formatTeam(players, teamBPlayerIds)}
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
+              </section>
+            )}       
+
           {(() => {
             const nearGameKind = getNearGameKindFromPreview(settings.mode, preview);
             const currentNearResult = getNearResultForHole(nearResults, currentHole.id);

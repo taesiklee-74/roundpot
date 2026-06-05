@@ -37,6 +37,10 @@ export type VegasTeamMode =
   | "randomAfterHole"
   | "previousRanks";
 
+export type VegasTeamAssignmentMode =
+  | "auto"
+  | "manual";
+
 export type HusseinSelector =
   | "previousFirst"
   | "previousSecond";
@@ -65,6 +69,7 @@ export type VegasSettings = {
   amountPerHole: number;
   carryOverEnabled: boolean;
   teamMode: VegasTeamMode;
+  teamAssignmentMode?: VegasTeamAssignmentMode;
 };
 
 export type HusseinSettings = {
