@@ -2702,8 +2702,7 @@ function saveCurrentHoleAndShowResult() {
             />
 
             {currentPrizeSection}
-            {otherScreensSection}
-
+            
             {isLastHole ? (
               <button
                 type="button"
@@ -2721,6 +2720,9 @@ function saveCurrentHoleAndShowResult() {
                 다음 홀로
               </button>
             )}
+
+            {otherScreensSection}
+
           </>
         )}
 
