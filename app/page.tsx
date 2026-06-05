@@ -2008,54 +2008,52 @@ function saveCurrentHoleAndShowResult() {
               </label>
               <div className="mt-4 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">
                 <p className="font-semibold">팀 결정 방식</p>
-                <div className="mt-2 grid grid-cols-1 gap-2">
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.vegas.teamMode === "randomAfterHole"
-                        ? "bg-blue-600 text-white"
-                        : "bg-white text-blue-900"
-                    }`}
-                    onClick={() => updateSettings("vegas", { teamMode: "randomAfterHole" })}
-                  >
-                    홀 종료 후 랜덤 드로우
-                  </button>
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.vegas.teamMode === "previousRanks"
-                        ? "bg-blue-600 text-white"
-                        : "bg-white text-blue-900"
-                    }`}
-                    onClick={() => updateSettings("vegas", { teamMode: "previousRanks" })}
-                  >
-                    전홀 1·4등 vs 2·3등
-                  </button>
-                </div>
-                <div className="mt-4 rounded-xl bg-orange-50 p-3 text-sm text-orange-900">
-                  <p className="font-semibold">팀 입력 방식</p>
-                  <p className="mt-1 text-xs">
-                    자동 배정은 기존 규칙대로 팀을 만들고, 직접 입력은 라운드 중 홀별로 팀을 지정합니다.
-                  </p>
+                <div className="mt-2 grid gap-2">
+                  {[
+                    {
+                      key: "previousRanks",
+                      label: "전홀 1,4등 vs 2,3등",
+                      teamMode: "previousRanks" as const,
+                      teamAssignmentMode: "auto" as const,
+                    },
+                    {
+                      key: "randomAfterHole",
+                      label: "홀 종료 후 랜덤 드로우",
+                      teamMode: "randomAfterHole" as const,
+                      teamAssignmentMode: "auto" as const,
+                    },
+                    {
+                      key: "manualAfterHole",
+                      label: "홀 종료 후 직접 입력",
+                      teamMode: "randomAfterHole" as const,
+                      teamAssignmentMode: "manual" as const,
+                    },
+                  ].map((option) => {
+                    const isSelected =
+                      settings.vegas.teamMode === option.teamMode &&
+                      (settings.vegas.teamAssignmentMode ?? "auto") ===
+                        option.teamAssignmentMode;
 
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {(["auto", "manual"] as const).map((assignmentMode) => (
+                    return (
                       <button
-                        key={assignmentMode}
+                        key={option.key}
                         type="button"
-                        className={`rounded-xl px-3 py-2 font-semibold ${
-                          settings.vegas.teamAssignmentMode === assignmentMode
+                        className={`rounded-xl px-3 py-3 text-sm font-bold ${
+                          isSelected
                             ? "bg-orange-600 text-white"
                             : "bg-white text-orange-900"
                         }`}
                         onClick={() =>
                           updateSettings("vegas", {
-                            teamAssignmentMode: assignmentMode,
+                            teamMode: option.teamMode,
+                            teamAssignmentMode: option.teamAssignmentMode,
                           })
                         }
                       >
-                        {assignmentMode === "auto" ? "자동 배정" : "직접 입력"}
+                        {option.label}
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
                 <p className="mt-3">사전 총액: {formatPlainAmount(settings.vegas.amountPerHole * holeCount)}</p>
                 <p>1인 선납 예상: {formatPlainAmount((settings.vegas.amountPerHole * holeCount) / 4)}</p>
