@@ -420,6 +420,77 @@ function formatTeam(players: Player[], playerIds: string[]) {
   return playerIds.map((playerId) => getPlayerName(players, playerId)).join(" · ");
 }
 
+function cloneVegasAssignmentToHole(params: {
+  assignment: TeamAssignment;
+  nextHole: Hole;
+}): TeamAssignment {
+  const { assignment, nextHole } = params;
+
+  return {
+    ...assignment,
+    holeId: nextHole.id,
+    holeNumber: nextHole.holeNumber,
+    teams: [
+      {
+        ...assignment.teams[0],
+        playerIds: [...assignment.teams[0].playerIds],
+      },
+      {
+        ...assignment.teams[1],
+        playerIds: [...assignment.teams[1].playerIds],
+      },
+    ],
+    reason: "동점 이월로 이전 홀 팀 유지",
+  };
+}
+
+function cloneHusseinAssignmentToHole(params: {
+  assignment: HusseinAssignment;
+  nextHole: Hole;
+}): HusseinAssignment {
+  const { assignment, nextHole } = params;
+
+  return {
+    ...assignment,
+    holeId: nextHole.id,
+    holeNumber: nextHole.holeNumber,
+    reason: "동점 이월로 이전 홀 구성 유지",
+  };
+}
+
+function upsertVegasTeamAssignment(
+  assignments: TeamAssignment[],
+  nextAssignment: TeamAssignment
+): TeamAssignment[] {
+  const existingIndex = assignments.findIndex(
+    (assignment) => assignment.holeId === nextAssignment.holeId
+  );
+
+  if (existingIndex === -1) {
+    return [...assignments, nextAssignment];
+  }
+
+  return assignments.map((assignment, index) =>
+    index === existingIndex ? nextAssignment : assignment
+  );
+}
+
+function upsertHusseinAssignment(
+  assignments: HusseinAssignment[],
+  nextAssignment: HusseinAssignment
+): HusseinAssignment[] {
+  const existingIndex = assignments.findIndex(
+    (assignment) => assignment.holeId === nextAssignment.holeId
+  );
+
+  if (existingIndex === -1) {
+    return [...assignments, nextAssignment];
+  }
+
+  return assignments.map((assignment, index) =>
+    index === existingIndex ? nextAssignment : assignment
+  );
+}
 
 type SchoolLatestResultDisplay = {
   firstPrizeAmount?: number;
@@ -1605,6 +1676,60 @@ function saveCurrentHoleAndShowResult() {
 
   function goToNextHoleFromResult() {
     returnToPlay();
+  }
+
+  function goToNextHole() {
+    if (currentHoleIndex >= holeCount - 1) {
+      setRoundView("final-share");
+      return;
+    }
+
+    const currentHole = holes[currentHoleIndex];
+    const nextHole = holes[currentHoleIndex + 1];
+    const latestResult = activeCalculation?.latestResult ?? null;
+
+    const shouldCarryTeamAssignment =
+      latestResult?.isCarryOver === true ||
+      latestResult?.winnerType === "none";
+
+    if (shouldCarryTeamAssignment && currentHole && nextHole) {
+      if (settings.mode === "vegas") {
+        const currentAssignment = vegasTeamAssignments.find(
+          (assignment) => assignment.holeId === currentHole.id
+        );
+
+        if (currentAssignment) {
+          const nextAssignment = cloneVegasAssignmentToHole({
+            assignment: currentAssignment,
+            nextHole,
+          });
+
+          setVegasTeamAssignments((prev) =>
+            upsertVegasTeamAssignment(prev, nextAssignment)
+          );
+        }
+      }
+
+      if (settings.mode === "hussein") {
+        const currentAssignment = husseinAssignments.find(
+          (assignment) => assignment.holeId === currentHole.id
+        );
+
+        if (currentAssignment) {
+          const nextAssignment = cloneHusseinAssignmentToHole({
+            assignment: currentAssignment,
+            nextHole,
+          });
+
+          setHusseinAssignments((prev) =>
+            upsertHusseinAssignment(prev, nextAssignment)
+          );
+        }
+      }
+    }
+
+    setCurrentHoleIndex((prev) => prev + 1);
+    setRoundView("play");
   }
 
   function formatSavedTime(value: string | null) {
