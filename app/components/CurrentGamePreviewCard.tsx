@@ -42,7 +42,9 @@ export default function CurrentGamePreviewCard({
       <h2 className="text-lg font-bold">이번 홀 게임</h2>
       <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
         <p className="font-semibold">{preview.title}</p>
-        <p className="mt-1 text-sm text-neutral-600">{preview.description}</p>
+        {!preview.husseinPlayerId && (
+          <p className="mt-1 text-sm text-neutral-600">{preview.description}</p>
+        )}
         {handicapEligiblePlayers.length > 0 && (
           <div className="mt-4 rounded-2xl bg-amber-50 p-4">
             <h3 className="text-sm font-bold text-amber-900">
@@ -84,7 +86,7 @@ export default function CurrentGamePreviewCard({
           </div>
         )}
 
-        {preview.teams && (
+        {preview.teams && preview.teams.length > 0 && !preview.husseinPlayerId && (
           <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
             {preview.teams.map((team) => (
               <div key={team.id} className="rounded-xl bg-white p-3">

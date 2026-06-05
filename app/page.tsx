@@ -96,7 +96,7 @@ const DEFAULT_PARS: Array<3 | 4 | 5> = [
   4, 4, 3, 5, 4, 4, 5, 3, 4,
 ];
 
-const DEFAULT_PLAYER_NAMES = ["1프로", "2프로", "", ""];
+const DEFAULT_PLAYER_NAMES = ["1프로", "2프로", "3pro", "4pro"];
 
 type SavedRoundState = {
   hasStarted: boolean;
@@ -1532,8 +1532,182 @@ function updateManualVegasTeamAForHole(holeId: string, teamAPlayerIds: string[])
   });
 }
 
+function getScoreStrokesForPlayer(
+  scoresToUse: Score[],
+  holeId: string,
+  playerId: string
+): number | null {
+  return (
+    scoresToUse.find(
+      (score) => score.holeId === holeId && score.playerId === playerId
+    )?.strokes ?? null
+  );
+}
+
+function getTeamStrokesForHole(params: {
+  teamPlayerIds: string[];
+  hole: Hole;
+  scoresToUse: Score[];
+}): number | null {
+  const { teamPlayerIds, hole, scoresToUse } = params;
+
+  let total = 0;
+
+  for (const playerId of teamPlayerIds) {
+    const strokes = getScoreStrokesForPlayer(scoresToUse, hole.id, playerId);
+
+    if (strokes === null) {
+      return null;
+    }
+
+    total += strokes;
+  }
+
+  return total;
+}
+
+function isVegasAssignmentTie(params: {
+  assignment: TeamAssignment;
+  hole: Hole;
+  scoresToUse: Score[];
+}): boolean {
+  const { assignment, hole, scoresToUse } = params;
+
+  const teamAScore = getTeamStrokesForHole({
+    teamPlayerIds: assignment.teams[0].playerIds,
+    hole,
+    scoresToUse,
+  });
+
+  const teamBScore = getTeamStrokesForHole({
+    teamPlayerIds: assignment.teams[1].playerIds,
+    hole,
+    scoresToUse,
+  });
+
+  return teamAScore !== null && teamBScore !== null && teamAScore === teamBScore;
+}
+
+function isHusseinAssignmentTie(params: {
+  assignment: HusseinAssignment;
+  hole: Hole;
+  players: Player[];
+  scoresToUse: Score[];
+}): boolean {
+  const { assignment, hole, players, scoresToUse } = params;
+
+  const husseinStrokes = getScoreStrokesForPlayer(
+    scoresToUse,
+    hole.id,
+    assignment.husseinPlayerId
+  );
+
+  if (husseinStrokes === null) {
+    return false;
+  }
+
+  const restPlayerIds = players
+    .filter((player) => player.id !== assignment.husseinPlayerId)
+    .map((player) => player.id);
+
+  const restStrokes = restPlayerIds.map((playerId) =>
+    getScoreStrokesForPlayer(scoresToUse, hole.id, playerId)
+  );
+
+  if (restStrokes.some((strokes) => strokes === null)) {
+    return false;
+  }
+
+  const numericRestStrokes = restStrokes as number[];
+
+  const husseinCompareScore =
+    settings.hussein.compareMode === "bestScore"
+      ? husseinStrokes
+      : husseinStrokes * 3;
+
+  const restCompareScore =
+    settings.hussein.compareMode === "bestScore"
+      ? Math.min(...numericRestStrokes)
+      : numericRestStrokes.reduce((sum, value) => sum + value, 0);
+
+  return husseinCompareScore === restCompareScore;
+}
+
+function cloneVegasAssignmentToHole(params: {
+  assignment: TeamAssignment;
+  nextHole: Hole;
+}): TeamAssignment {
+  const { assignment, nextHole } = params;
+
+  return {
+    holeId: nextHole.id,
+    holeNumber: nextHole.holeNumber,
+    teams: [
+      {
+        ...assignment.teams[0],
+        playerIds: [...assignment.teams[0].playerIds],
+      },
+      {
+        ...assignment.teams[1],
+        playerIds: [...assignment.teams[1].playerIds],
+      },
+    ],
+    reason: "동점 이월로 이전 홀 팀 유지",
+  };
+}
+
+function cloneHusseinAssignmentToHole(params: {
+  assignment: HusseinAssignment;
+  nextHole: Hole;
+}): HusseinAssignment {
+  const { assignment, nextHole } = params;
+
+  return {
+    holeId: nextHole.id,
+    holeNumber: nextHole.holeNumber,
+    husseinPlayerId: assignment.husseinPlayerId,
+    reason: "동점 이월로 이전 홀 구성 유지",
+  };
+}
+
+function upsertVegasTeamAssignment(
+  assignments: TeamAssignment[],
+  nextAssignment: TeamAssignment
+): TeamAssignment[] {
+  const existingIndex = assignments.findIndex(
+    (assignment) => assignment.holeId === nextAssignment.holeId
+  );
+
+  if (existingIndex === -1) {
+    return [...assignments, nextAssignment];
+  }
+
+  return assignments.map((assignment, index) =>
+    index === existingIndex ? nextAssignment : assignment
+  );
+}
+
+function upsertHusseinAssignment(
+  assignments: HusseinAssignment[],
+  nextAssignment: HusseinAssignment
+): HusseinAssignment[] {
+  const existingIndex = assignments.findIndex(
+    (assignment) => assignment.holeId === nextAssignment.holeId
+  );
+
+  if (existingIndex === -1) {
+    return [...assignments, nextAssignment];
+  }
+
+  return assignments.map((assignment, index) =>
+    index === existingIndex ? nextAssignment : assignment
+  );
+}
+
 function saveCurrentHoleAndShowResult() {
   if (!currentHole) return;
+
+  const nextHole = holes[currentHoleIndex + 1] ?? null;
 
   const nextScores = scores.map((score) => {
     if (score.holeId !== currentHole.id) return score;
@@ -1556,16 +1730,23 @@ function saveCurrentHoleAndShowResult() {
   }
 
   if (settings.mode === "vegas") {
+    const storedAssignment =
+      vegasTeamAssignments.find(
+        (assignment) => assignment.holeId === currentHole.id
+      ) ?? null;
+
     const manualAssignment =
       getManualVegasTeamAssignmentForHole(currentHole.id);
 
     const shouldUseManualAssignment =
+      storedAssignment === null &&
       settings.vegas.teamAssignmentMode === "manual" &&
       manualAssignment !== null &&
       manualAssignment.teamAPlayerIds.length === 2 &&
       manualAssignment.teamBPlayerIds.length === 2;
 
     if (
+      storedAssignment === null &&
       settings.vegas.teamAssignmentMode === "manual" &&
       !shouldUseManualAssignment
     ) {
@@ -1573,41 +1754,75 @@ function saveCurrentHoleAndShowResult() {
       return;
     }
 
-    const assignment: TeamAssignment = shouldUseManualAssignment
-      ? {
-          holeId: currentHole.id,
-          holeNumber: currentHole.holeNumber,
-          teams: [
-            {
-              id: "A",
-              name: "팀 A",
-              playerIds: manualAssignment.teamAPlayerIds,
-            },
-            {
-              id: "B",
-              name: "팀 B",
-              playerIds: manualAssignment.teamBPlayerIds,
-            },
-          ],
-          reason: "직접 입력",
-        }
-      : createVegasTeamAssignment({
-          hole: currentHole,
-          players,
-          holes,
-          scores: nextBettingScores,
-          settings: { ...settings.vegas, enabled: true },
-          teamAssignments: vegasTeamAssignments,
-        });
+    const assignment: TeamAssignment =
+      storedAssignment ??
+      (shouldUseManualAssignment
+        ? {
+            holeId: currentHole.id,
+            holeNumber: currentHole.holeNumber,
+            teams: [
+              {
+                id: "A",
+                name: "팀 A",
+                playerIds: manualAssignment.teamAPlayerIds,
+              },
+              {
+                id: "B",
+                name: "팀 B",
+                playerIds: manualAssignment.teamBPlayerIds,
+              },
+            ],
+            reason: "직접 입력",
+          }
+        : createVegasTeamAssignment({
+            hole: currentHole,
+            players,
+            holes,
+            scores: nextBettingScores,
+            settings: { ...settings.vegas, enabled: true },
+            teamAssignments: vegasTeamAssignments,
+          }));
 
-    const addAssignment = () => {
-      setVegasTeamAssignments((prev) => {
-        if (prev.some((item) => item.holeId === assignment.holeId)) return prev;
-        return [...prev, assignment];
-      });
+    const assignmentsWithCurrentHole = upsertVegasTeamAssignment(
+      vegasTeamAssignments,
+      assignment
+    );
+
+    const vegasResultWithCurrentHole = calculateVegasBet({
+      players,
+      holes,
+      scores: nextBettingScores,
+      settings: { ...settings.vegas, enabled: true },
+      teamAssignments: assignmentsWithCurrentHole,
+    });
+
+    const currentHoleResult =
+      vegasResultWithCurrentHole.holeResults.find(
+        (result) => result.holeId === currentHole.id
+      ) ?? null;
+
+    const carryAssignment =
+      currentHoleResult?.winnerType === "none" && nextHole
+        ? cloneVegasAssignmentToHole({
+            assignment,
+            nextHole,
+          })
+        : null;
+
+    const nextVegasTeamAssignments = carryAssignment
+      ? upsertVegasTeamAssignment(assignmentsWithCurrentHole, carryAssignment)
+      : assignmentsWithCurrentHole;
+
+    const commitVegasAssignments = () => {
+      setVegasTeamAssignments(nextVegasTeamAssignments);
     };
 
-    if (settings.vegas.teamMode === "randomAfterHole") {
+    const shouldShowRandomDrawAnimation =
+      settings.vegas.teamMode === "randomAfterHole" &&
+      storedAssignment === null &&
+      !shouldUseManualAssignment;
+
+    if (shouldShowRandomDrawAnimation) {
       setVegasDrawAnimation({
         isRunning: true,
         holeNumber: currentHole.holeNumber,
@@ -1617,7 +1832,7 @@ function saveCurrentHoleAndShowResult() {
       });
 
       window.setTimeout(() => {
-        addAssignment();
+        commitVegasAssignments();
         setScores(nextScores);
         setVegasDrawAnimation({
           isRunning: false,
@@ -1636,7 +1851,7 @@ function saveCurrentHoleAndShowResult() {
       return;
     }
 
-    addAssignment();
+    commitVegasAssignments();
     finishSave();
     return;
   }
@@ -1651,112 +1866,141 @@ function saveCurrentHoleAndShowResult() {
       husseinAssignments,
     });
 
-    setHusseinAssignments((prev) => {
-      if (prev.some((item) => item.holeId === assignment.holeId)) return prev;
-      return [...prev, assignment];
+    const assignmentsWithCurrentHole = upsertHusseinAssignment(
+      husseinAssignments,
+      assignment
+    );
+
+    const husseinResultWithCurrentHole = calculateHusseinBet({
+      players,
+      holes,
+      scores: nextBettingScores,
+      settings: { ...settings.hussein, enabled: true },
+      husseinAssignments: assignmentsWithCurrentHole,
     });
+
+    const currentHoleResult =
+      husseinResultWithCurrentHole.holeResults.find(
+        (result) => result.holeId === currentHole.id
+      ) ?? null;
+
+    const carryAssignment =
+      currentHoleResult?.winnerType === "none" && nextHole
+        ? cloneHusseinAssignmentToHole({
+            assignment,
+            nextHole,
+          })
+        : null;
+
+    const nextHusseinAssignments = carryAssignment
+      ? upsertHusseinAssignment(assignmentsWithCurrentHole, carryAssignment)
+      : assignmentsWithCurrentHole;
+
+    setHusseinAssignments(nextHusseinAssignments);
+    finishSave();
+    return;
   }
 
   finishSave();
 }
 
-  function returnToPlay() {
-    const firstIncompleteHoleIndex = getFirstIncompleteHoleIndex(
-      players,
-      holes,
-      scores
-    );
+function returnToPlay() {
+  const firstIncompleteHoleIndex = getFirstIncompleteHoleIndex(
+    players,
+    holes,
+    scores
+  );
 
-    if (firstIncompleteHoleIndex !== null) {
-      setCurrentHoleIndex(firstIncompleteHoleIndex);
-    }
-
-    setRoundView("play");
+  if (firstIncompleteHoleIndex !== null) {
+    setCurrentHoleIndex(firstIncompleteHoleIndex);
   }
 
-  function goToNextHoleFromResult() {
-    returnToPlay();
+  setRoundView("play");
+}
+
+function goToNextHoleFromResult() {
+  returnToPlay();
+}
+
+function goToNextHole() {
+  if (currentHoleIndex >= holeCount - 1) {
+    setRoundView("final-share");
+    return;
   }
 
-  function goToNextHole() {
-    if (currentHoleIndex >= holeCount - 1) {
-      setRoundView("final-share");
-      return;
-    }
+  const currentHole = holes[currentHoleIndex];
+  const nextHole = holes[currentHoleIndex + 1];
+  const latestResult = activeCalculation?.latestResult ?? null;
 
-    const currentHole = holes[currentHoleIndex];
-    const nextHole = holes[currentHoleIndex + 1];
-    const latestResult = activeCalculation?.latestResult ?? null;
+  const shouldCarryTeamAssignment =
+    latestResult?.isCarryOver === true ||
+    latestResult?.winnerType === "none";
 
-    const shouldCarryTeamAssignment =
-      latestResult?.isCarryOver === true ||
-      latestResult?.winnerType === "none";
+  if (shouldCarryTeamAssignment && currentHole && nextHole) {
+    if (settings.mode === "vegas") {
+      const currentAssignment = vegasTeamAssignments.find(
+        (assignment) => assignment.holeId === currentHole.id
+      );
 
-    if (shouldCarryTeamAssignment && currentHole && nextHole) {
-      if (settings.mode === "vegas") {
-        const currentAssignment = vegasTeamAssignments.find(
-          (assignment) => assignment.holeId === currentHole.id
+      if (currentAssignment) {
+        const nextAssignment = cloneVegasAssignmentToHole({
+          assignment: currentAssignment,
+          nextHole,
+        });
+
+        setVegasTeamAssignments((prev) =>
+          upsertVegasTeamAssignment(prev, nextAssignment)
         );
-
-        if (currentAssignment) {
-          const nextAssignment = cloneVegasAssignmentToHole({
-            assignment: currentAssignment,
-            nextHole,
-          });
-
-          setVegasTeamAssignments((prev) =>
-            upsertVegasTeamAssignment(prev, nextAssignment)
-          );
-        }
-      }
-
-      if (settings.mode === "hussein") {
-        const currentAssignment = husseinAssignments.find(
-          (assignment) => assignment.holeId === currentHole.id
-        );
-
-        if (currentAssignment) {
-          const nextAssignment = cloneHusseinAssignmentToHole({
-            assignment: currentAssignment,
-            nextHole,
-          });
-
-          setHusseinAssignments((prev) =>
-            upsertHusseinAssignment(prev, nextAssignment)
-          );
-        }
       }
     }
 
-    setCurrentHoleIndex((prev) => prev + 1);
-    setRoundView("play");
+    if (settings.mode === "hussein") {
+      const currentAssignment = husseinAssignments.find(
+        (assignment) => assignment.holeId === currentHole.id
+      );
+
+      if (currentAssignment) {
+        const nextAssignment = cloneHusseinAssignmentToHole({
+          assignment: currentAssignment,
+          nextHole,
+        });
+
+        setHusseinAssignments((prev) =>
+          upsertHusseinAssignment(prev, nextAssignment)
+        );
+      }
+    }
   }
 
-  function formatSavedTime(value: string | null) {
-    if (!value) return "아직 저장 전";
-    const date = new Date(value);
-    return date.toLocaleTimeString("ko-KR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  }
+  setCurrentHoleIndex((prev) => prev + 1);
+  setRoundView("play");
+}
 
-  function renderModeButton(mode: BettingMode) {
-    const active = settings.mode === mode;
+function formatSavedTime(value: string | null) {
+  if (!value) return "아직 저장 전";
+  const date = new Date(value);
+  return date.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
 
-    return (
-      <button
-        key={mode}
-        className={`rounded-2xl px-4 py-3 text-sm font-bold ${
-          active ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-700"
-        }`}
-        onClick={() => updateMode(mode)}
-      >
-        {getModeLabel(mode)}
-      </button>
-    );
-  }
+function renderModeButton(mode: BettingMode) {
+  const active = settings.mode === mode;
+
+  return (
+    <button
+      key={mode}
+      className={`rounded-2xl px-4 py-3 text-sm font-bold ${
+        active ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-700"
+      }`}
+      onClick={() => updateMode(mode)}
+    >
+      {getModeLabel(mode)}
+    </button>
+  );
+}
   const latestResult = activeCalculation?.latestResult ?? null;
   const latestHandicapAdjustments = useMemo<HandicapScoreAdjustment[]>(() => {
     if (!latestResult) {
@@ -2916,7 +3160,10 @@ function saveCurrentHoleAndShowResult() {
           </div>
 
           {settings.mode === "vegas" &&
-            settings.vegas.teamAssignmentMode === "manual" && (
+            settings.vegas.teamAssignmentMode === "manual" &&
+            !vegasTeamAssignments.some(
+              (assignment) => assignment.holeId === currentHole.id
+            ) && (
               <section className="rounded-2xl bg-orange-50 p-5 shadow-sm">
                 <h2 className="text-lg font-bold text-orange-950">
                   라스베가스 팀 직접 입력
