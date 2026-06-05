@@ -434,13 +434,7 @@ export default function LatestResultSection({
 
           const explicitHusseinPlayerId = husseinResult.husseinPlayerId ?? "";
 
-          const husseinPlayerId =
-            explicitHusseinPlayerId ||
-            (husseinResult.restPlayerIds?.length === 3
-              ? (players.find(
-                  (player) => !husseinResult.restPlayerIds?.includes(player.id),
-                )?.id ?? "")
-              : "");
+          const husseinPlayerId = husseinResult.husseinPlayerId ?? "";
 
           const restPlayerIds =
             husseinResult.restPlayerIds?.length === 3

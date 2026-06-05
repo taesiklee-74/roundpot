@@ -163,7 +163,18 @@ export type HoleGameResult = {
   winnerType: WinnerType;
   winnerPlayerIds: ID[];
   isCarryOver: boolean;
+
   tiedPlayerIds?: ID[];
+
+  // Hussein display fields
+  husseinPlayerId?: ID;
+  husseinPlayerScore?: number;
+  restPlayerIds?: ID[];
+  restBestScore?: number;
+  restTotalScore?: number;
+  husseinCompareScore?: number;
+  restCompareScore?: number;
+  husseinWinnerType?: "hussein" | "rest" | "tie";
 };
 
 export type GameResult = {

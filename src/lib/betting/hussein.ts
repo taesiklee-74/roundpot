@@ -348,6 +348,18 @@ function createHoleResult(params: {
       ? `${husseinPlayer.name} ${husseinStrokes}타 vs 3명팀 베스트 ${restBestScore}타`
       : `${husseinPlayer.name} ${husseinStrokes}타×3=${husseinCompareScore} vs 3명팀 합산 ${restTotalScore}타`;
 
+  const restPlayerIds = restPlayers.map((player) => player.id);
+
+  const husseinDisplayFields = {
+    husseinPlayerId: husseinPlayer.id,
+    husseinPlayerScore: husseinStrokes,
+    restPlayerIds,
+    restBestScore,
+    restTotalScore,
+    husseinCompareScore,
+    restCompareScore,
+  };   
+
   if (husseinCompareScore < restCompareScore) {
     return {
       holeId: hole.id,
@@ -362,6 +374,8 @@ function createHoleResult(params: {
       winnerType: "player",
       winnerPlayerIds: [husseinPlayer.id],
       isCarryOver: false,
+      ...husseinDisplayFields,
+      husseinWinnerType: "hussein",
     };
   }
 
@@ -379,29 +393,30 @@ function createHoleResult(params: {
       winnerType: "team",
       winnerPlayerIds: restPlayers.map((player) => player.id),
       isCarryOver: false,
+      ...husseinDisplayFields,
+      husseinWinnerType: "rest",
     };
   }
 
   return {
-    holeId: hole.id,
-    holeNumber: hole.holeNumber,
-    gameType: "hussein",
-    title: `${hole.holeNumber}번 홀 ${formatGameType("hussein")}`,
-    description: carryOverEnabled ? "후세인 동점 · 상금 이월" : "후세인 동점 · 미지급",
-    detail: carryOverEnabled
-      ? `${compareDetail} · ${prizeAmount.toLocaleString()}원이 다음 후세인 홀로 이월됩니다.`
-      : `${compareDetail} · ${prizeAmount.toLocaleString()}원은 지급되지 않습니다.`,
-    baseAmount,
-    carriedIn,
-    prizeAmount,
-    winnerType: "none",
-    winnerPlayerIds: [],
-    isCarryOver: carryOverEnabled,
-    tiedPlayerIds: [
-      husseinPlayer.id,
-      ...restPlayers.map((player) => player.id),
-    ],
-  };
+      holeId: hole.id,
+      holeNumber: hole.holeNumber,
+      gameType: "hussein",
+      title: `${hole.holeNumber}번 홀 ${formatGameType("hussein")}`,
+      description: carryOverEnabled ? "후세인 동점 · 상금 이월" : "후세인 동점 · 미지급",
+      detail: carryOverEnabled
+        ? `${compareDetail} · ${prizeAmount.toLocaleString()}원이 다음 후세인 홀로 이월됩니다.`
+        : `${compareDetail} · ${prizeAmount.toLocaleString()}원은 지급되지 않습니다.`,
+      baseAmount,
+      carriedIn,
+      prizeAmount,
+      winnerType: "none",
+      winnerPlayerIds: [],
+      isCarryOver: carryOverEnabled,
+      tiedPlayerIds: [husseinPlayer.id, ...restPlayerIds],
+      ...husseinDisplayFields,
+      husseinWinnerType: "tie",
+    };
 }
 
 export function calculateHusseinBet({
