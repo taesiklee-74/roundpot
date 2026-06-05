@@ -38,7 +38,7 @@ export default function CurrentGamePreviewCard({
   }
 
   return (
-    <section className="rounded-2xl bg-white p-5 shadow-sm">
+    <section className="rounded-2xl bg-orange-50 p-5 shadow-sm">
       <h2 className="text-lg font-bold">이번 홀 게임</h2>
       <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
         <p className="font-semibold">{preview.title}</p>

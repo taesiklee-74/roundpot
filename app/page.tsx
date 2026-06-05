@@ -96,7 +96,7 @@ const DEFAULT_PARS: Array<3 | 4 | 5> = [
   4, 4, 3, 5, 4, 4, 5, 3, 4,
 ];
 
-const DEFAULT_PLAYER_NAMES = ["1프로", "2프로", "3프로", "4프로"];
+const DEFAULT_PLAYER_NAMES = ["1프로", "2프로", "", ""];
 
 type SavedRoundState = {
   hasStarted: boolean;
@@ -1067,6 +1067,22 @@ export default function Home() {
     );
   }
 
+  function clearDefaultPlayerNameOnFocus(index: number) {
+    setPlayerNames((prev) =>
+      prev.map((name, currentIndex) => {
+        if (currentIndex !== index) {
+          return name;
+        }
+
+        if (name === "1프로" || name === "2프로") {
+          return "";
+        }
+
+        return name;
+      })
+    );
+  }
+
   function updateHoleHandicapRank(index: number, handicapRank: number | null) {
   setHoleHandicapRanks((prev) => {
     const nextRanks = normalizeHoleHandicapRanks(prev, holeCount);
@@ -1719,6 +1735,7 @@ function saveCurrentHoleAndShowResult() {
                     <input
                       className="w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
                       value={name}
+                      onFocus={() => clearDefaultPlayerNameOnFocus(index)}
                       onChange={(event) => updatePlayerName(index, event.target.value)}
                       placeholder={`플레이어 ${index + 1}`}
                     />
@@ -1802,41 +1819,6 @@ function saveCurrentHoleAndShowResult() {
             <h2 className="text-lg font-bold">내기 방식 선택</h2>
             <div className="mt-4 grid grid-cols-2 gap-2">
               {(["stroke", "skins", "vegas", "hussein", "school", "cycle"] as BettingMode[]).map(renderModeButton)}
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold">니어 옵션</h2>
-            <p className="mt-1 text-sm text-neutral-500">
-                파3 홀에서 모든 게임에 적용됩니다.
-            </p>
-
-            <label className="mt-4 flex items-center justify-between rounded-xl bg-neutral-50 p-3">
-              <span className="font-medium">니어 사용</span>
-              <input
-                type="checkbox"
-                checked={nearEnabled}
-                onChange={(event) => setNearEnabled(event.target.checked)}
-              />
-            </label>
-
-            <label className="mt-4 block text-sm font-medium text-neutral-700">
-              니어 상금
-            </label>
-            <input
-              type="number"
-              className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-400"
-              value={nearAmount}
-              onChange={(event) => setNearAmount(Number(event.target.value || 0))}
-              min={0}
-              step={1000}
-              disabled={!nearEnabled}
-            />
-
-            <div className="mt-4 rounded-xl bg-lime-50 p-3 text-sm text-lime-900">
-              <p className="font-semibold">지급 방식</p>
-              <p>스킨스·후세인·학교·스트로크: 니어 위너 개인에게 지급</p>
-              <p>라스베가스: 니어 라스베가스 팀 니어: 위너가 속한 팀원 각각 니어 상금 수령</p>
             </div>
           </section>
 
@@ -2248,6 +2230,41 @@ function saveCurrentHoleAndShowResult() {
               </div>
             </section>
           )}
+
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold">니어 옵션</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+                파3 홀에서 모든 게임에 적용됩니다.
+            </p>
+
+            <label className="mt-4 flex items-center justify-between rounded-xl bg-neutral-50 p-3">
+              <span className="font-medium">니어 사용</span>
+              <input
+                type="checkbox"
+                checked={nearEnabled}
+                onChange={(event) => setNearEnabled(event.target.checked)}
+              />
+            </label>
+
+            <label className="mt-4 block text-sm font-medium text-neutral-700">
+              니어 상금
+            </label>
+            <input
+              type="number"
+              className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-400"
+              value={nearAmount}
+              onChange={(event) => setNearAmount(Number(event.target.value || 0))}
+              min={0}
+              step={1000}
+              disabled={!nearEnabled}
+            />
+
+            <div className="mt-4 rounded-xl bg-lime-50 p-3 text-sm text-lime-900">
+              <p className="font-semibold">지급 방식</p>
+              <p>스킨스·후세인·학교·스트로크: 니어 위너 개인에게 지급</p>
+              <p>라스베가스: 니어 라스베가스 팀 니어: 위너가 속한 팀원 각각 니어 상금 수령</p>
+            </div>
+          </section>
 
           <button
             className="w-full rounded-2xl bg-neutral-900 px-5 py-4 text-lg font-bold text-white shadow-sm"
