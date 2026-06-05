@@ -456,15 +456,58 @@ export function getVegasCurrentGamePreview(params: {
   const baseAmount = settings.amountPerHole;
   const prizeAmount = baseAmount + carriedIn;
 
+  const storedAssignment = getStoredAssignment(nextHole, teamAssignments);
+
+  const isCarriedAssignment =
+    storedAssignment !== null &&
+    (storedAssignment.reason.includes("캐리") ||
+      storedAssignment.reason.includes("동점") ||
+      storedAssignment.reason.includes("이월") ||
+      storedAssignment.reason.includes("이전 홀"));
+
+  if (isCarriedAssignment) {
+    return {
+      holeId: nextHole.id,
+      holeNumber: nextHole.holeNumber,
+      gameType: "vegas",
+      title: `${nextHole.holeNumber}번 홀 라스베가스`,
+      description:
+        carriedIn > 0
+          ? `이월 ${carriedIn.toLocaleString()}원 포함. 이번 홀은 지난 홀 팀이 캐리됩니다.`
+          : "이번 홀은 지난 홀 팀이 캐리됩니다.",
+      baseAmount,
+      carriedIn,
+      prizeAmount,
+      teams: storedAssignment.teams,
+    };
+  }
+
+  if (settings.teamAssignmentMode === "manual") {
+    return {
+      holeId: nextHole.id,
+      holeNumber: nextHole.holeNumber,
+      gameType: "vegas",
+      title: `${nextHole.holeNumber}번 홀 라스베가스`,
+      description:
+        carriedIn > 0
+          ? `이월 ${carriedIn.toLocaleString()}원 포함. 직접 입력한 팀 구성으로 라스베가스를 진행합니다.`
+          : "직접 입력한 팀 구성으로 라스베가스를 진행합니다.",
+      baseAmount,
+      carriedIn,
+      prizeAmount,
+      teams: storedAssignment?.teams,
+    };
+  }
   if (settings.teamMode === "randomAfterHole") {
     return {
       holeId: nextHole.id,
       holeNumber: nextHole.holeNumber,
       gameType: "vegas",
       title: `${nextHole.holeNumber}번 홀 라스베가스`,
-      description: carriedIn > 0
-        ? `이월 ${carriedIn.toLocaleString()}원 포함. 홀 종료 후 랜덤 드로우로 팀을 정합니다.`
-        : "홀 종료 후 랜덤 드로우로 팀을 정합니다.",
+      description:
+        carriedIn > 0
+          ? `이월 ${carriedIn.toLocaleString()}원 포함. 홀 종료 후 랜덤 드로우로 팀을 정합니다.`
+          : "홀 종료 후 랜덤 드로우로 팀을 정합니다.",
       baseAmount,
       carriedIn,
       prizeAmount,
@@ -485,9 +528,10 @@ export function getVegasCurrentGamePreview(params: {
     holeNumber: nextHole.holeNumber,
     gameType: "vegas",
     title: `${nextHole.holeNumber}번 홀 라스베가스`,
-    description: carriedIn > 0
-      ? `이월 ${carriedIn.toLocaleString()}원 포함. ${assignment.reason}`
-      : assignment.reason,
+    description:
+      carriedIn > 0
+        ? `이월 ${carriedIn.toLocaleString()}원 포함. ${assignment.reason}`
+        : assignment.reason,
     baseAmount,
     carriedIn,
     prizeAmount,
