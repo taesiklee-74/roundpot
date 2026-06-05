@@ -432,15 +432,24 @@ export default function LatestResultSection({
           const husseinResult = latestResult as typeof latestResult &
             HusseinLatestResultDisplay;
 
+          const explicitHusseinPlayerId = husseinResult.husseinPlayerId ?? "";
+
           const husseinPlayerId =
-            husseinResult.husseinPlayerId ??
-            latestResult.winnerPlayerIds[0] ??
-            "";
+            explicitHusseinPlayerId ||
+            (husseinResult.restPlayerIds?.length === 3
+              ? (players.find(
+                  (player) => !husseinResult.restPlayerIds?.includes(player.id),
+                )?.id ?? "")
+              : "");
+
           const restPlayerIds =
-            husseinResult.restPlayerIds ??
-            players
-              .filter((player) => player.id !== husseinPlayerId)
-              .map((player) => player.id);
+            husseinResult.restPlayerIds?.length === 3
+              ? husseinResult.restPlayerIds
+              : husseinPlayerId
+                ? players
+                    .filter((player) => player.id !== husseinPlayerId)
+                    .map((player) => player.id)
+                : [];
 
           const winnerType =
             husseinResult.husseinWinnerType ??
