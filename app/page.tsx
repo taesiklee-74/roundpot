@@ -1559,8 +1559,8 @@ function saveCurrentHoleAndShowResult() {
         window.setTimeout(() => {
           setVegasDrawAnimation(null);
           setRoundView("latest-result");
-        }, 1200);
-      }, 1300);
+        }, 300);
+      }, 300);
 
       return;
     }
