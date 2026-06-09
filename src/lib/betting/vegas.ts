@@ -150,6 +150,114 @@ function hasTie(standings: PlayerHoleStanding[]): boolean {
   return false;
 }
 
+function pickSeededPlayer(
+  standings: PlayerHoleStanding[],
+  seed: string
+): PlayerHoleStanding {
+  return seededShuffle(standings, seed)[0];
+}
+
+function createPreviousRanksTeamAssignmentFromStandings(params: {
+  hole: Hole;
+  previousHole: Hole;
+  players: Player[];
+  standings: PlayerHoleStanding[];
+}): TeamAssignment {
+  const { hole, previousHole, players, standings } = params;
+
+  const groups = new Map<number, PlayerHoleStanding[]>();
+
+  for (const standing of standings) {
+    const current = groups.get(standing.strokes) ?? [];
+    current.push(standing);
+    groups.set(standing.strokes, current);
+  }
+
+  const scoreGroups = Array.from(groups.entries())
+    .sort(([scoreA], [scoreB]) => scoreA - scoreB)
+    .map(([, group]) => group);
+
+  const groupSizes = scoreGroups.map((group) => group.length).join("-");
+
+  const reason = `전홀 ${previousHole.holeNumber}번 홀 1·4등 vs 2·3등`;
+
+  if (groupSizes === "1-1-1-1") {
+    return createTeamsFromPlayerIds(
+      hole,
+      [standings[0].player.id, standings[3].player.id],
+      [standings[1].player.id, standings[2].player.id],
+      reason
+    );
+  }
+
+  if (groupSizes === "1-2-1") {
+    return createTeamsFromPlayerIds(
+      hole,
+      [scoreGroups[0][0].player.id, scoreGroups[2][0].player.id],
+      [scoreGroups[1][0].player.id, scoreGroups[1][1].player.id],
+      `${reason} · 2등 동률`
+    );
+  }
+
+  if (groupSizes === "2-1-1") {
+    const selectedFirst = pickSeededPlayer(
+      scoreGroups[0],
+      `vegas-tied-first:${previousHole.id}:${hole.id}`
+    );
+
+    const otherFirst = scoreGroups[0].find(
+      (standing) => standing.player.id !== selectedFirst.player.id
+    );
+
+    if (!otherFirst) {
+      return createRandomTeamAssignment(
+        hole,
+        players,
+        `vegas-invalid-tied-first-${previousHole.id}`
+      );
+    }
+
+    return createTeamsFromPlayerIds(
+      hole,
+      [selectedFirst.player.id, scoreGroups[1][0].player.id],
+      [otherFirst.player.id, scoreGroups[2][0].player.id],
+      `${reason} · 1등 동률`
+    );
+  }
+
+  if (groupSizes === "1-1-2") {
+    const selectedThird = pickSeededPlayer(
+      scoreGroups[2],
+      `vegas-tied-third:${previousHole.id}:${hole.id}`
+    );
+
+    const otherThird = scoreGroups[2].find(
+      (standing) => standing.player.id !== selectedThird.player.id
+    );
+
+    if (!otherThird) {
+      return createRandomTeamAssignment(
+        hole,
+        players,
+        `vegas-invalid-tied-third-${previousHole.id}`
+      );
+    }
+
+    return createTeamsFromPlayerIds(
+      hole,
+      [scoreGroups[0][0].player.id, selectedThird.player.id],
+      [scoreGroups[1][0].player.id, otherThird.player.id],
+      `${reason} · 3등 동률`
+    );
+  }
+
+  return createRandomTeamAssignment(
+    hole,
+    players,
+    `vegas-unresolved-tie-previous-hole-${previousHole.id}`
+  );
+}
+
 function getPreviousHole(holes: Hole[], hole: Hole): Hole | null {
   return holes.find((candidate) => candidate.holeNumber === hole.holeNumber - 1) ?? null;
 }
@@ -172,20 +280,20 @@ function createPreviousRanksTeamAssignment(
 
   const previousStandings = getHoleStandings(players, previousHole, scores);
 
-  if (!previousStandings || hasTie(previousStandings)) {
+  if (!previousStandings) {
     return createRandomTeamAssignment(
       hole,
       players,
-      `vegas-tie-previous-hole-${previousHole.id}`
+      `vegas-no-previous-standings-${previousHole.id}`
     );
   }
 
-  return createTeamsFromPlayerIds(
+  return createPreviousRanksTeamAssignmentFromStandings({
     hole,
-    [previousStandings[0].player.id, previousStandings[3].player.id],
-    [previousStandings[1].player.id, previousStandings[2].player.id],
-    `전홀 ${previousHole.holeNumber}번 홀 1·4등 vs 2·3등`
-  );
+    previousHole,
+    players,
+    standings: previousStandings,
+  });
 }
 
 function getStoredAssignment(

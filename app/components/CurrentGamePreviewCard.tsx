@@ -42,7 +42,7 @@ export default function CurrentGamePreviewCard({
       <h2 className="text-lg font-bold">이번 홀 게임</h2>
       <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
         <p className="font-semibold">{preview.title}</p>
-        {!preview.husseinPlayerId && (
+        {preview.gameType !== "hussein" && (
           <p className="mt-1 text-sm text-neutral-600">{preview.description}</p>
         )}
         {handicapEligiblePlayers.length > 0 && (
@@ -97,22 +97,26 @@ export default function CurrentGamePreviewCard({
           </div>
         )}
 
-        {preview.husseinPlayerId && (
+        {preview.gameType === "hussein" && (
           <div className="mt-4 rounded-2xl bg-purple-50 p-4">
             <p className="text-sm font-semibold text-purple-700">
               이번 홀 후세인
             </p>
             <p className="mt-1 text-3xl font-black text-purple-900">
-              {getPlayerName(players, preview.husseinPlayerId)}
+              {preview.husseinPlayerId
+                ? getPlayerName(players, preview.husseinPlayerId)
+                : "TBD"}
             </p>
             <p className="mt-2 text-sm text-purple-800">
-              상대팀:{" "}
-              {formatTeam(
-                players,
-                players
-                  .filter((player) => player.id !== preview.husseinPlayerId)
-                  .map((player) => player.id)
-              )}
+              3명팀:{" "}
+              {preview.husseinPlayerId
+                ? formatTeam(
+                    players,
+                    players
+                      .filter((player) => player.id !== preview.husseinPlayerId)
+                      .map((player) => player.id)
+                  )
+                : "후세인 선택 후 자동 지정"}
             </p>
           </div>
         )}

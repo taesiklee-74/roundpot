@@ -30,6 +30,7 @@ import {
 } from "../src/lib/betting/handicap";
 import {
   DEFAULT_BETTING_SETTINGS,
+  Team,
   type BettingMode,
   type BettingSettingsV2,
   type CurrentGamePreview,
@@ -96,7 +97,7 @@ const DEFAULT_PARS: Array<3 | 4 | 5> = [
   4, 4, 3, 5, 4, 4, 5, 3, 4,
 ];
 
-const DEFAULT_PLAYER_NAMES = ["1프로", "2프로", "3pro", "4pro"];
+const DEFAULT_PLAYER_NAMES = ["로리맥길로이", "넬리코다", "최경주", "김효주"];
 
 type SavedRoundState = {
   hasStarted: boolean;
@@ -113,6 +114,7 @@ type SavedRoundState = {
   currentHoleIndex: number;
   vegasTeamAssignments: TeamAssignment[];
   husseinAssignments: HusseinAssignment[];
+  manualFirstHusseinPlayerId: string;
   manualVegasTeamAssignments: ManualVegasTeamAssignment[];
   nearEnabled: boolean;
   nearAmount: number;
@@ -187,7 +189,7 @@ const createDefaultHoleHandicapRanks = (
 const normalizeHoleHandicapRanks = (
   ranks: Array<number | null | undefined>,
   holeCount: 9 | 18
-): Array<number | null> =>
+  ): Array<number | null> =>
   Array.from({ length: holeCount }, (_, index) => {
     const rank = ranks[index];
 
@@ -742,7 +744,7 @@ function getActiveCalculation(params: {
     };
   }
 
-  if (settings.mode === "vegas") {
+  if (settings.mode === "vegas") {        
     const vegasSettings = { ...settings.vegas, enabled: true };
     const gameResult = calculateVegasBet({
       players,
@@ -916,10 +918,15 @@ export default function Home() {
   const [currentHoleIndex, setCurrentHoleIndex] = useState(0);
   const [roundView, setRoundView] = useState<RoundView>("play");
   const [vegasTeamAssignments, setVegasTeamAssignments] = useState<TeamAssignment[]>([]);
+  const [manualVegasTeamAPlayerIds, setManualVegasTeamAPlayerIds] = useState<
+    string[]
+  >([]);
   const [manualVegasTeamAssignments, setManualVegasTeamAssignments] = useState<
     ManualVegasTeamAssignment[]
   >([]);
   const [husseinAssignments, setHusseinAssignments] = useState<HusseinAssignment[]>([]);
+  const [manualFirstHusseinPlayerId, setManualFirstHusseinPlayerId] =
+  useState<string>("");
   const [vegasDrawAnimation, setVegasDrawAnimation] = useState<VegasDrawAnimation | null>(null);
   const [nearEnabled, setNearEnabled] = useState(false);
   const [nearAmount, setNearAmount] = useState(5000);
@@ -1011,6 +1018,11 @@ export default function Home() {
       setHusseinAssignments(
         Array.isArray(saved.husseinAssignments) ? saved.husseinAssignments : []
       );
+      setManualFirstHusseinPlayerId(
+        typeof saved.manualFirstHusseinPlayerId === "string"
+          ? saved.manualFirstHusseinPlayerId
+          : ""
+      );
       setNearEnabled(Boolean(saved.nearEnabled));
       setNearAmount(
         typeof saved.nearAmount === "number" && saved.nearAmount >= 0
@@ -1046,6 +1058,7 @@ export default function Home() {
       vegasTeamAssignments,
       manualVegasTeamAssignments,
       husseinAssignments,
+      manualFirstHusseinPlayerId,
       nearEnabled,
       nearAmount,
       nearResults,
@@ -1071,6 +1084,7 @@ export default function Home() {
     vegasTeamAssignments,
     manualVegasTeamAssignments,
     husseinAssignments,
+    manualFirstHusseinPlayerId,
     nearEnabled,
     nearAmount,
     nearResults,
@@ -1166,7 +1180,7 @@ export default function Home() {
           return name;
         }
 
-        if (name === "1프로" || name === "2프로") {
+        if (name === "로리맥길로이" || name === "넬리코다" || name === "최경주" || name === "김효주") {
           return "";
         }
 
@@ -1423,6 +1437,7 @@ export default function Home() {
     setVegasTeamAssignments([]);
     setManualVegasTeamAssignments([]);
     setHusseinAssignments([]);
+    setManualFirstHusseinPlayerId("");
     setNearResults([]);
     setVegasDrawAnimation(null);
     setCurrentHoleIndex(0);
@@ -1740,17 +1755,23 @@ function saveCurrentHoleAndShowResult() {
 
     const shouldUseManualAssignment =
       storedAssignment === null &&
-      settings.vegas.teamAssignmentMode === "manual" &&
+      (settings.vegas.teamAssignmentMode === "manual" ||
+        shouldManuallySelectFirstVegasTeams) &&
       manualAssignment !== null &&
       manualAssignment.teamAPlayerIds.length === 2 &&
       manualAssignment.teamBPlayerIds.length === 2;
 
     if (
       storedAssignment === null &&
-      settings.vegas.teamAssignmentMode === "manual" &&
+      (settings.vegas.teamAssignmentMode === "manual" ||
+        shouldManuallySelectFirstVegasTeams) &&
       !shouldUseManualAssignment
     ) {
-      alert("라스베가스 팀 A를 2명 선택해 주세요.");
+      alert(
+        shouldManuallySelectFirstVegasTeams
+          ? "1번 홀 라스베가스 팀 A 2명을 선택해 주세요."
+          : "라스베가스 팀 A를 2명 선택해 주세요."
+      );
       return;
     }
 
@@ -1857,14 +1878,39 @@ function saveCurrentHoleAndShowResult() {
   }
 
   if (settings.mode === "hussein") {
-    const assignment = createHusseinAssignment({
-      hole: currentHole,
-      players,
-      holes,
-      scores: nextBettingScores,
-      settings: { ...settings.hussein, enabled: true },
-      husseinAssignments,
-    });
+    const carriedHusseinAssignment = husseinAssignments.find(
+      (assignment) => assignment.holeId === currentHole.id
+    );
+
+    const shouldUseManualFirstHussein =
+      currentHole.holeNumber === 1 && manualFirstHusseinPlayerId.length > 0;
+
+    if (
+      currentHole.holeNumber === 1 &&
+      !carriedHusseinAssignment &&
+      !shouldUseManualFirstHussein
+    ) {
+      alert("1번 홀 후세인을 선택해 주세요.");
+      return;
+    }
+
+    const assignment: HusseinAssignment = carriedHusseinAssignment
+      ? carriedHusseinAssignment
+      : shouldUseManualFirstHussein
+        ? {
+            holeId: currentHole.id,
+            holeNumber: currentHole.holeNumber,
+            husseinPlayerId: manualFirstHusseinPlayerId,
+            reason: "1번 홀 직접 선택",
+          }
+        : createHusseinAssignment({
+            hole: currentHole,
+            players,
+            holes,
+            scores: nextScores,
+            settings: { ...settings.hussein, enabled: true },
+            husseinAssignments,
+          });
 
     const assignmentsWithCurrentHole = upsertHusseinAssignment(
       husseinAssignments,
@@ -2777,6 +2823,58 @@ function renderModeButton(mode: BettingMode) {
   const currentHoleSaved = isHoleSaved(players, scores, currentHole.id);
   const preview = activeCalculation.currentGamePreview;
 
+  const shouldManuallySelectFirstVegasTeams =
+    settings.mode === "vegas" &&
+    settings.vegas.teamMode === "previousRanks" &&
+    settings.vegas.teamAssignmentMode === "auto" &&
+    currentHole.holeNumber === 1;
+    
+  const firstVegasManualTeams: [Team, Team] =
+    manualVegasTeamAPlayerIds.length === 2
+      ? [
+          {
+            id: "A",
+            name: "팀 A",
+            playerIds: manualVegasTeamAPlayerIds,
+          },
+          {
+            id: "B",
+            name: "팀 B",
+            playerIds: players
+              .filter((player) => !manualVegasTeamAPlayerIds.includes(player.id))
+              .map((player) => player.id),
+          },
+        ]
+      : [
+          {
+            id: "A",
+            name: "팀 A",
+            playerIds: [],
+          },
+          {
+            id: "B",
+            name: "팀 B",
+            playerIds: [],
+          },
+        ];
+
+  const currentGamePreviewForDisplay =
+    preview && settings.mode === "hussein" && currentHole.holeNumber === 1
+      ? {
+          ...preview,
+          husseinPlayerId: manualFirstHusseinPlayerId || null,
+        }
+      : preview && shouldManuallySelectFirstVegasTeams
+        ? {
+            ...preview,
+            description:
+              manualVegasTeamAPlayerIds.length === 2
+                ? "직접 선택한 팀 구성으로 라스베가스를 진행합니다."
+                : "1번 홀 팀을 직접 선택해 주세요.",
+            teams: firstVegasManualTeams,
+          }
+        : preview;
+
   const currentHandicapAdjustments: HandicapScoreAdjustment[] =
   getHandicapScoreAdjustmentsForHole({
     players,
@@ -3083,7 +3181,7 @@ function renderModeButton(mode: BettingMode) {
 )}
 
         <CurrentGamePreviewCard
-          preview={preview}
+          preview={currentGamePreviewForDisplay}
           players={players}
           formatPlainAmount={formatPlainAmount}
           formatTeam={formatTeam}
@@ -3092,6 +3190,62 @@ function renderModeButton(mode: BettingMode) {
           handicapEligiblePlayers={currentHandicapEligiblePlayers}
         />
 
+      {settings.mode === "hussein" &&
+        currentHole.holeNumber === 1 &&
+        !husseinAssignments.some(
+          (assignment) => assignment.holeId === currentHole.id
+        ) && (
+          <section className="rounded-2xl bg-purple-50 p-5 shadow-sm">
+            <h2 className="text-lg font-bold text-purple-950">
+              1번 홀 후세인 선택
+            </h2>
+            <p className="mt-1 text-sm text-purple-800">
+              1번 홀 후세인을 직접 선택하세요. 나머지 3명은 3명팀이 됩니다.
+            </p>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {players.map((player) => {
+                const isSelected = manualFirstHusseinPlayerId === player.id;
+
+                return (
+                  <button
+                    key={player.id}
+                    type="button"
+                    className={`rounded-xl px-3 py-3 text-sm font-bold ${
+                      isSelected
+                        ? "bg-purple-700 text-white"
+                        : "bg-white text-purple-900"
+                    }`}
+                    onClick={() => setManualFirstHusseinPlayerId(player.id)}
+                  >
+                    {player.name}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 rounded-xl bg-white p-3 text-sm">
+              <p>
+                <span className="font-bold">후세인:</span>{" "}
+                {manualFirstHusseinPlayerId
+                  ? getPlayerName(players, manualFirstHusseinPlayerId)
+                  : "선택하세요"}
+              </p>
+              <p className="mt-1">
+                <span className="font-bold">3명팀:</span>{" "}
+                {manualFirstHusseinPlayerId
+                  ? formatTeam(
+                      players,
+                      players
+                        .filter((player) => player.id !== manualFirstHusseinPlayerId)
+                        .map((player) => player.id)
+                    )
+                  : "후세인 선택 후 자동 지정"}
+              </p>
+            </div>
+          </section>
+        )}
+        
         <section className="rounded-2xl bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -3160,16 +3314,22 @@ function renderModeButton(mode: BettingMode) {
           </div>
 
           {settings.mode === "vegas" &&
-            settings.vegas.teamAssignmentMode === "manual" &&
+            (settings.vegas.teamAssignmentMode === "manual" ||
+              shouldManuallySelectFirstVegasTeams) &&
             !vegasTeamAssignments.some(
               (assignment) => assignment.holeId === currentHole.id
             ) && (
               <section className="rounded-2xl bg-orange-50 p-5 shadow-sm">
                 <h2 className="text-lg font-bold text-orange-950">
-                  라스베가스 팀 직접 입력
+                  {shouldManuallySelectFirstVegasTeams
+                    ? "1번 홀 팀 선택"
+                    : "이번 홀 팀 직접 입력"}
                 </h2>
+
                 <p className="mt-1 text-sm text-orange-800">
-                  팀 A 플레이어 2명을 선택하세요. 나머지 2명은 자동으로 팀 B가 됩니다.
+                  {shouldManuallySelectFirstVegasTeams
+                    ? "1번 홀 팀을 직접 선택하세요. 팀 A 2명을 선택하면 나머지 2명은 팀 B가 됩니다."
+                    : "팀 A 2명을 선택하세요. 나머지 2명은 팀 B가 됩니다."}
                 </p>
 
                 {(() => {
