@@ -53,6 +53,35 @@ export type CycleTieMode =
   | "carryOnlyNextGame"
   | "carryAndRepeatSameGame";
 
+export type OecdStage = 0 | 1 | 2 | 3;
+
+export type OecdExitRule = "untilZero" | "belowEntryAmount";
+
+export type OecdPenaltyDestination = "commonPot" | "winner";
+
+export type OecdSettings = {
+  enabled: boolean;
+  stage1Amount: number;
+  stage2Amount: number;
+  stage3Amount: number;
+  exitRule: OecdExitRule;
+  penaltyDestination: OecdPenaltyDestination;
+};
+
+export type OecdPlayerStatus = {
+  playerId: ID;
+  stage: OecdStage;
+  isTarget: boolean;
+  cumulativeBeforeHole: number;
+};
+
+export type HoleOecdPenalty = {
+  holeId: ID;
+  holeNumber: number;
+  playerId: ID;
+  amount: number;
+};
+
 export type StrokeSettings = {
   enabled: boolean;
   amountPerStroke: number;
@@ -106,6 +135,7 @@ export type BettingSettingsV2 = {
   hussein: HusseinSettings;
   school: SchoolSettings;
   cycle: CycleSettings;
+  oecd: OecdSettings;
 };
 
 export type PlayerScoreSummary = {
@@ -250,7 +280,7 @@ export const DEFAULT_BETTING_SETTINGS: BettingSettingsV2 = {
     selector: "previousFirst",
     compareMode: "bestScore",
   },
-    school: {
+  school: {
     enabled: false,
     firstPrizeAmount: 10000,
     secondPrizeAmount: 10000,
@@ -265,6 +295,14 @@ export const DEFAULT_BETTING_SETTINGS: BettingSettingsV2 = {
     husseinSelector: "previousFirst",
     husseinCompareMode: "bestScore",
     vegasTeamMode: "previousRanks",
+  },
+  oecd: {
+    enabled: false,
+    stage1Amount: 60000,
+    stage2Amount: 100000,
+    stage3Amount: 140000,
+    exitRule: "untilZero",
+    penaltyDestination: "commonPot",
   },
 };
 
