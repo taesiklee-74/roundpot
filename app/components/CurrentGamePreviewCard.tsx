@@ -1,6 +1,10 @@
 "use client";
 
-import type { CurrentGamePreview, Player } from "../../src/lib/betting/types";
+import type {
+  CurrentGamePreview,
+  OecdPlayerStatus,
+  Player,
+} from "../../src/lib/betting/types";
 import type {
   HandicapEligiblePlayerForHole,
   HandicapScoreAdjustment,
@@ -14,15 +18,8 @@ type CurrentGamePreviewCardProps = {
   getPlayerName: (players: Player[], playerId: string) => string;
   handicapAdjustments: HandicapScoreAdjustment[];
   handicapEligiblePlayers: HandicapEligiblePlayerForHole[];
+  oecdStatuses?: OecdPlayerStatus[];
 };
-
-function formatScoreToParForDisplay(scoreToPar: number): string {
-  if (scoreToPar === 0) {
-    return "0";
-  }
-
-  return scoreToPar > 0 ? `+${scoreToPar}` : `${scoreToPar}`;
-}
 
 export default function CurrentGamePreviewCard({
   preview,
@@ -32,10 +29,13 @@ export default function CurrentGamePreviewCard({
   getPlayerName,
   handicapAdjustments,
   handicapEligiblePlayers,
+  oecdStatuses = [],
 }: CurrentGamePreviewCardProps) {
   if (!preview) {
     return null;
   }
+
+  const oecdTargets = oecdStatuses.filter((status) => status.isTarget);
 
   return (
     <section className="rounded-2xl bg-orange-50 p-5 shadow-sm">
@@ -45,6 +45,38 @@ export default function CurrentGamePreviewCard({
         {preview.gameType !== "hussein" && (
           <p className="mt-1 text-sm text-neutral-600">{preview.description}</p>
         )}
+
+        {oecdStatuses.length > 0 && (
+          <div className="mt-4 rounded-2xl bg-rose-50 p-4">
+            <h3 className="text-sm font-bold text-rose-900">이번 홀 OECD 대상</h3>
+
+            {oecdTargets.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {oecdTargets.map((status) => (
+                  <div
+                    key={status.playerId}
+                    className="flex items-center justify-between gap-3 rounded-xl bg-white p-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-semibold">
+                        {getPlayerName(players, status.playerId)}
+                      </p>
+                      <p className="mt-1 text-xs text-neutral-500">
+                        홀 시작 전 누적 {formatPlainAmount(status.cumulativeBeforeHole)}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-rose-100 px-3 py-1 text-xs font-black text-rose-700">
+                      OECD {status.stage}단계
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-rose-800">이번 홀 OECD 대상 없음</p>
+            )}
+          </div>
+        )}
+
         {handicapEligiblePlayers.length > 0 && (
           <div className="mt-4 rounded-2xl bg-amber-50 p-4">
             <h3 className="text-sm font-bold text-amber-900">
