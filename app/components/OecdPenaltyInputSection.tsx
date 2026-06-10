@@ -14,6 +14,7 @@ type OecdPenaltyInputSectionProps = {
   players: Player[];
   statuses: OecdPlayerStatus[];
   penalties: HoleOecdPenalty[];
+  penaltyUnitAmount: number;
   formatPlainAmount: (amount: number) => string;
   onChangePenalty: (penalty: HoleOecdPenalty) => void;
 };
@@ -24,6 +25,7 @@ export default function OecdPenaltyInputSection({
   players,
   statuses,
   penalties,
+  penaltyUnitAmount,
   formatPlainAmount,
   onChangePenalty,
 }: OecdPenaltyInputSectionProps) {
@@ -31,6 +33,7 @@ export default function OecdPenaltyInputSection({
     return null;
   }
 
+  const unitAmount = Math.max(1000, Math.round(penaltyUnitAmount || 1000));
   const statusByPlayerId = new Map(statuses.map((status) => [status.playerId, status]));
   const penaltiesByPlayerId = new Map(
     penalties
@@ -39,11 +42,22 @@ export default function OecdPenaltyInputSection({
   );
   const targets = statuses.filter((status) => status.isTarget);
 
+  function updatePenaltyAmount(playerId: string, amount: number) {
+    const normalizedAmount = Math.max(0, Math.round(amount / unitAmount) * unitAmount);
+
+    onChangePenalty({
+      holeId: hole.id,
+      holeNumber: hole.holeNumber,
+      playerId,
+      amount: normalizedAmount,
+    });
+  }
+
   return (
     <section className="rounded-2xl bg-rose-50 p-5 shadow-sm">
       <h2 className="text-lg font-bold text-rose-950">OECD 벌금 입력</h2>
       <p className="mt-1 text-sm text-rose-800">
-        OECD 조건은 앱이 자동 판정하지 않습니다. 이번 홀 대상자에게 발생한 벌금을 직접 입력하세요.
+        OECD 조건은 앱이 자동 판정하지 않습니다. 벌금은 기본 정액 {formatPlainAmount(unitAmount)}의 배수로 입력합니다.
       </p>
 
       {targets.length === 0 ? (
@@ -56,6 +70,7 @@ export default function OecdPenaltyInputSection({
             const status = statusByPlayerId.get(player.id) ?? null;
             const isTarget = status?.isTarget === true;
             const currentPenalty = penaltiesByPlayerId.get(player.id)?.amount ?? 0;
+            const currentMultiple = Math.round(currentPenalty / unitAmount);
 
             return (
               <div
@@ -72,23 +87,29 @@ export default function OecdPenaltyInputSection({
                         : ""}
                     </p>
                   </div>
-                  <input
-                    type="number"
-                    className="w-28 rounded-xl border border-rose-200 px-3 py-2 text-right text-sm font-bold outline-none focus:border-rose-700 disabled:bg-neutral-100 disabled:text-neutral-400"
-                    value={currentPenalty || ""}
-                    min={0}
-                    step={1000}
-                    placeholder="0"
-                    disabled={!isTarget}
-                    onChange={(event) =>
-                      onChangePenalty({
-                        holeId: hole.id,
-                        holeNumber: hole.holeNumber,
-                        playerId: player.id,
-                        amount: Number(event.target.value || 0),
-                      })
-                    }
-                  />
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="h-9 w-9 rounded-full bg-rose-100 text-lg font-bold text-rose-800 disabled:bg-neutral-100 disabled:text-neutral-400"
+                      disabled={!isTarget || currentPenalty <= 0}
+                      onClick={() => updatePenaltyAmount(player.id, currentPenalty - unitAmount)}
+                    >
+                      -
+                    </button>
+                    <div className="w-28 rounded-xl border border-rose-200 bg-white px-3 py-2 text-right text-sm font-bold">
+                      <p>{formatPlainAmount(currentPenalty)}</p>
+                      <p className="text-xs font-medium text-neutral-500">{currentMultiple}배</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="h-9 w-9 rounded-full bg-rose-700 text-lg font-bold text-white disabled:bg-neutral-100 disabled:text-neutral-400"
+                      disabled={!isTarget}
+                      onClick={() => updatePenaltyAmount(player.id, currentPenalty + unitAmount)}
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
               </div>
             );
