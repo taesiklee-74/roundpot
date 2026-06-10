@@ -48,28 +48,41 @@ export function getThresholdBasedOecdStage(
   return 0;
 }
 
-function hasJoinedOecdBeforeOrAtCurrentHole(params: {
+function getMaintainedOecdStageBeforeOrAtCurrentHole(params: {
   playerId: ID;
   currentHoleNumber: number;
   holes: Hole[];
   cumulativeBeforeHoleByNumber: Record<number, Record<ID, number>>;
+  currentCumulativeBeforeHole: number;
   settings: OecdSettings;
-}): boolean {
+}): OecdStage {
   const {
     playerId,
     currentHoleNumber,
     holes,
     cumulativeBeforeHoleByNumber,
+    currentCumulativeBeforeHole,
     settings,
   } = params;
 
-  return holes
-    .filter((hole) => hole.holeNumber <= currentHoleNumber)
-    .some((hole) => {
-      const cumulative =
-        cumulativeBeforeHoleByNumber[hole.holeNumber]?.[playerId] ?? 0;
-      return cumulative >= settings.stage1Amount;
-    });
+  let highestStage: OecdStage = 0;
+
+  for (const hole of holes) {
+    if (hole.holeNumber > currentHoleNumber) {
+      continue;
+    }
+
+    const cumulative =
+      cumulativeBeforeHoleByNumber[hole.holeNumber]?.[playerId] ??
+      (hole.holeNumber === currentHoleNumber ? currentCumulativeBeforeHole : 0);
+    const stage = getThresholdBasedOecdStage(cumulative, settings);
+
+    if (stage > highestStage) {
+      highestStage = stage;
+    }
+  }
+
+  return highestStage;
 }
 
 export function calculateOecdStatusesForHole(params: {
@@ -104,33 +117,32 @@ export function calculateOecdStatusesForHole(params: {
       cumulativeBeforeHole,
       settings
     );
-
-    if (settings.exitRule === "belowEntryAmount") {
-      return {
-        playerId: player.id,
-        cumulativeBeforeHole,
-        stage: thresholdStage,
-        isTarget: thresholdStage > 0,
-      };
-    }
-
-    const hasJoined = hasJoinedOecdBeforeOrAtCurrentHole({
+    const maintainedStage = getMaintainedOecdStageBeforeOrAtCurrentHole({
       playerId: player.id,
       currentHoleNumber: currentHole.holeNumber,
       holes,
       cumulativeBeforeHoleByNumber,
+      currentCumulativeBeforeHole: cumulativeBeforeHole,
       settings,
     });
 
-    const isTarget = hasJoined && cumulativeBeforeHole > 0;
-    const stage: OecdStage = isTarget
-      ? ((Math.max(1, thresholdStage) as OecdStage))
-      : 0;
+    if (settings.exitRule === "belowEntryAmount") {
+      const isTarget = thresholdStage > 0;
+
+      return {
+        playerId: player.id,
+        cumulativeBeforeHole,
+        stage: isTarget ? maintainedStage : 0,
+        isTarget,
+      };
+    }
+
+    const isTarget = maintainedStage > 0 && cumulativeBeforeHole > 0;
 
     return {
       playerId: player.id,
       cumulativeBeforeHole,
-      stage,
+      stage: isTarget ? maintainedStage : 0,
       isTarget,
     };
   });
