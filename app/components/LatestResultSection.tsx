@@ -488,46 +488,57 @@ export default function LatestResultSection({
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-3">
-                <div
-                  className={`rounded-2xl p-4 ${
-                    winnerType === "hussein" ? "bg-blue-50" : "bg-white"
-                  }`}
-                >
-                  <p className="text-sm font-semibold text-neutral-500">
-                    후세인
-                  </p>
-                  <p className="mt-1 text-2xl font-black text-neutral-900">
-                    {getPlayerName(players, husseinPlayerId)}
-                  </p>
-                  {husseinResult.husseinPlayerScore !== undefined && (
-                    <p className="mt-1 text-sm text-neutral-500">
-                      {husseinResult.husseinPlayerScore}타
+                {winnerType === "hussein" && (
+                  <div className="rounded-2xl bg-blue-50 p-4">
+                    <p className="text-sm font-semibold text-blue-700">승리팀 · 후세인</p>
+                    <p className="mt-1 text-2xl font-black text-neutral-900">
+                      {getPlayerName(players, husseinPlayerId)}
                     </p>
-                  )}
-                </div>
+                    {husseinResult.husseinPlayerScore !== undefined && (
+                      <p className="mt-1 text-sm text-neutral-500">
+                        {husseinResult.husseinPlayerScore}타
+                      </p>
+                    )}
+                  </div>
+                )}
 
-                <div
-                  className={`rounded-2xl p-4 ${
-                    winnerType === "rest" ? "bg-blue-50" : "bg-white"
-                  }`}
-                >
-                  <p className="text-sm font-semibold text-neutral-500">
-                    3명팀
-                  </p>
-                  <p className="mt-1 text-xl font-black text-neutral-900">
-                    {formatTeam(players, restPlayerIds)}
-                  </p>
-                  {husseinResult.restBestScore !== undefined && (
-                    <p className="mt-1 text-sm text-neutral-500">
-                      베스트 {husseinResult.restBestScore}타
-                      {husseinResult.restTotalScore !== undefined
-                        ? ` · 합산 ${husseinResult.restTotalScore}타`
-                        : ""}
+                {winnerType === "rest" && (
+                  <div className="rounded-2xl bg-blue-50 p-4">
+                    <p className="text-sm font-semibold text-blue-700">승리팀 · 3명팀</p>
+                    <p className="mt-1 text-xl font-black text-neutral-900">
+                      {formatTeam(players, restPlayerIds)}
                     </p>
-                  )}
-                </div>
+                    {husseinResult.restBestScore !== undefined && (
+                      <p className="mt-1 text-sm text-neutral-500">
+                        베스트 {husseinResult.restBestScore}타
+                        {husseinResult.restTotalScore !== undefined
+                          ? ` · 합산 ${husseinResult.restTotalScore}타`
+                          : ""}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {winnerType === "tie" && (
+                  <div className="rounded-2xl bg-amber-50 p-4">
+                    <p className="text-sm font-semibold text-amber-700">동점</p>
+                    <p className="mt-1 text-xl font-black text-neutral-900">
+                      이번 홀은 이월됩니다.
+                    </p>
+                    {tiedPlayerIds.length > 0 && (
+                      <p className="mt-1 text-sm text-amber-700">
+                        동점 대상:{" "}
+                        {formatPlayerNames({
+                          players,
+                          playerIds: tiedPlayerIds,
+                          getPlayerName,
+                        })}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
-
+              
               <div
                 className={`mt-3 rounded-2xl p-4 ${
                   winnerType === "tie" ? "bg-amber-50" : "bg-blue-50"

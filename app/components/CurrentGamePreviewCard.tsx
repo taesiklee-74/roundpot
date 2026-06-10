@@ -91,7 +91,11 @@ export default function CurrentGamePreviewCard({
             {preview.teams.map((team) => (
               <div key={team.id} className="rounded-xl bg-white p-3">
                 <p className="font-semibold">{team.name}</p>
-                <p>{formatTeam(players, team.playerIds)}</p>
+                <p>
+                  {team.playerIds.length > 0
+                    ? formatTeam(players, team.playerIds)
+                    : "TBD"}
+                </p>
               </div>
             ))}
           </div>

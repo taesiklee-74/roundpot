@@ -89,6 +89,10 @@ import {
   type NearGameKind,
   type NearResult,
 } from "../src/lib/betting/near";
+import ExportRoundScoreButton from "./components/ExportRoundScoreButton";
+import MedalPrizeSummaryCard from "./components/MedalPrizeSummaryCard";
+import FinalScorecardExportCard from "./components/FinalScorecardExportCard";
+import PrizeAmountRankingCard from "./components/PrizeAmountRankingCard";
 
 const STORAGE_KEY = "roundpot.refactored.withSchool.v1";
 
@@ -915,6 +919,28 @@ export default function Home() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [holes, setHoles] = useState<Hole[]>([]);
   const [scores, setScores] = useState<Score[]>([]);
+
+  const exportPlayers = players.map((player) => ({
+    id: player.id,
+    name: player.name,
+  }));
+
+  const exportHoles = holes
+    .slice()
+    .sort((a, b) => a.holeNumber - b.holeNumber)
+    .map((hole) => ({
+      holeNo: hole.holeNumber,
+      scores: Object.fromEntries(
+        players.map((player) => {
+          const score = scores.find(
+            (item) => item.holeId === hole.id && item.playerId === player.id,
+          );
+
+          return [player.id, score?.strokes ?? null];
+        }),
+      ),
+    }));
+    
   const [currentHoleIndex, setCurrentHoleIndex] = useState(0);
   const [roundView, setRoundView] = useState<RoundView>("play");
   const [vegasTeamAssignments, setVegasTeamAssignments] = useState<TeamAssignment[]>([]);
@@ -2913,46 +2939,36 @@ function renderModeButton(mode: BettingMode) {
     </button>
   );
 
-  const currentPrizeSection = (
-    <section className="rounded-2xl bg-white p-5 shadow-sm">
-      <h2 className="text-lg font-bold">현재 상금 누적 수령액</h2>
-      <p className="mt-1 text-sm text-neutral-500">
-        사전 모금형 게임은 현재까지 실제로 받은 상금 기준입니다.
-      </p>
+  const returnToLatestResultButton = (
+    <button
+      type="button"
+      className="w-full rounded-2xl bg-neutral-200 px-5 py-4 text-base font-semibold text-neutral-900"
+      onClick={() => setRoundView("latest-result")}
+    >
+      라운드로 돌아가기
+    </button>
+  );
 
-      <div className="mt-3 space-y-2">
-        {settlementSummary.players.map((summary) => {
-          const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
-          const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
-          const totalAmountWithNear = summary.totalPrizeAmount + nearTotalAmount;
+  const medalPrizeRows = settlementSummary.players.map((summary) => {
+    const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
+    const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
+    const totalAmountWithNear = summary.totalPrizeAmount + nearTotalAmount;
 
-          return (
-            <div key={summary.playerId} className="rounded-xl bg-neutral-50 p-3">
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{summary.playerName}</span>
-                <span className="font-bold text-blue-600">
-                  {formatAmount(totalAmountWithNear)}
-                </span>
-              </div>
+    return {
+      playerId: summary.playerId,
+      playerName: summary.playerName,
+      amount: totalAmountWithNear,
+    };
+  });
 
-              <p className="mt-1 text-xs text-neutral-500">
-                {formatPrizeBreakdown(summary)}
-              </p>
+  const medalPrizeSection = <MedalPrizeSummaryCard rows={medalPrizeRows} />;
 
-              {nearTotalAmount !== 0 && (
-                <p className="mt-1 text-xs text-lime-700">
-                  니어 정산: {formatAmount(nearTotalAmount)}
-                </p>
-              )}
-
-              <p className="mt-1 text-xs text-neutral-400">
-                {formatSettlementReference(summary)}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-    </section>
+  const latestPrizeSection = (
+    <PrizeAmountRankingCard
+      title="총획득 상금"
+      description="현재까지 실제로 획득한 상금 기준입니다."
+      rows={medalPrizeRows}
+    />
   );
 
   const otherScreensSection = (
@@ -3447,16 +3463,25 @@ function renderModeButton(mode: BettingMode) {
               nearResult={latestNearResult}
             />
 
-            {currentPrizeSection}
-            
+            {latestPrizeSection}            
+
             {isLastHole ? (
-              <button
-                type="button"
-                className="w-full rounded-2xl bg-neutral-900 px-5 py-4 text-base font-bold text-white shadow-sm"
-                onClick={() => setRoundView("final-share")}
-              >
-                최종 정산 보기
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="w-full rounded-2xl bg-neutral-900 px-5 py-4 text-base font-bold text-white shadow-sm"
+                  onClick={() => setRoundView("final-share")}
+                >
+                  최종 정산 보기
+                </button>
+
+                <ExportRoundScoreButton
+                  courseName={courseName} 
+                  playedAt={new Date().toISOString().slice(0, 10)}
+                  players={exportPlayers}
+                  holes={exportHoles}
+                />
+              </>
             ) : (
               <button
                 type="button"
@@ -3475,7 +3500,7 @@ function renderModeButton(mode: BettingMode) {
         {roundView === "settlement" && (
           <>
             {returnToPlayButton}
-            {currentPrizeSection}
+            {medalPrizeSection}
             {nearSettlementSection}
           </>
         )}
@@ -3504,11 +3529,19 @@ function renderModeButton(mode: BettingMode) {
 
         {roundView === "final-share" && (
           <>
-            {currentPrizeSection}
+            {medalPrizeSection}
             {nearSettlementSection}
             {strokeSettlementSection}
+
+            <FinalScorecardExportCard
+              courseName={courseName}
+              playedAt={new Date().toISOString().slice(0, 10)}
+              players={exportPlayers}
+              holes={exportHoles}
+            />
+
             {roundSummaryText && <RoundShareCard summaryText={roundSummaryText} />}
-            {returnToPlayButton}
+            {returnToLatestResultButton}
           </>
         )}
       </div>

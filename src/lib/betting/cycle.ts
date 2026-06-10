@@ -63,6 +63,25 @@ type CycleSkinsHoleResult = HoleGameResult & {
   skinsResultType: "win" | "tie";
 };
 
+type CycleHusseinHoleResult = HoleGameResult & {
+  innerGameType: "hussein";
+  husseinPlayerId: string;
+  restPlayerIds: string[];
+  husseinWinnerType: "hussein" | "rest" | "tie";
+  husseinPlayerScore: number;
+  restBestScore: number;
+  restTotalScore: number;
+};
+
+type CycleVegasHoleResult = HoleGameResult & {
+  innerGameType: "vegas";
+  teamAPlayerIds: string[];
+  teamBPlayerIds: string[];
+  teamAScore: number;
+  teamBScore: number;
+  winnerTeamId: "A" | "B" | null;
+};
+
 function getCycleBaseAmount(game: CycleGame, settings: CycleSettings): number {
   if (game === "skins") return settings.skinsAmount;
   if (game === "hussein") return settings.husseinAmount;
@@ -283,7 +302,7 @@ function createHusseinHoleResult(params: {
   baseAmount: number;
   carriedIn: number;
   prizeAmount: number;
-}): HoleGameResult | null {
+}): CycleHusseinHoleResult | null {
   const {
     players,
     hole,
@@ -315,6 +334,8 @@ function createHusseinHoleResult(params: {
     restCompareScore,
   } = scoreInfo;
 
+  const restPlayerIds = restPlayers.map((player) => player.id);
+
   const compareDetail =
     settings.husseinCompareMode === "bestScore"
       ? `${husseinPlayer.name} ${husseinStrokes}타 vs 3명팀 베스트 ${restBestScore}타`
@@ -334,6 +355,13 @@ function createHusseinHoleResult(params: {
       winnerType: "player",
       winnerPlayerIds: [husseinPlayer.id],
       isCarryOver: false,
+      innerGameType: "hussein",
+      husseinPlayerId: husseinPlayer.id,
+      restPlayerIds,
+      husseinWinnerType: "hussein",
+      husseinPlayerScore: husseinStrokes,
+      restBestScore,
+      restTotalScore,
     };
   }
 
@@ -351,6 +379,13 @@ function createHusseinHoleResult(params: {
       winnerType: "team",
       winnerPlayerIds: restPlayers.map((player) => player.id),
       isCarryOver: false,
+      innerGameType: "hussein",
+      husseinPlayerId: husseinPlayer.id,
+      restPlayerIds,
+      husseinWinnerType: "rest",
+      husseinPlayerScore: husseinStrokes,
+      restBestScore,
+      restTotalScore,
     };
   }
 
@@ -367,10 +402,14 @@ function createHusseinHoleResult(params: {
     winnerType: "none",
     winnerPlayerIds: [],
     isCarryOver: true,
-    tiedPlayerIds: [
-      husseinPlayer.id,
-      ...restPlayers.map((player) => player.id),
-    ],
+    tiedPlayerIds: [husseinPlayer.id, ...restPlayerIds],
+    innerGameType: "hussein",
+    husseinPlayerId: husseinPlayer.id,
+    restPlayerIds,
+    husseinWinnerType: "tie",
+    husseinPlayerScore: husseinStrokes,
+    restBestScore,
+    restTotalScore,
   };
 }
 
@@ -382,7 +421,7 @@ function createVegasHoleResult(params: {
   baseAmount: number;
   carriedIn: number;
   prizeAmount: number;
-}): HoleGameResult | null {
+}): CycleVegasHoleResult | null {
   const { players, hole, scores, assignment, baseAmount, carriedIn, prizeAmount } = params;
   const [teamA, teamB] = assignment.teams;
   const teamAScore = calculateTeamScore(teamA, hole, scores);
@@ -406,6 +445,12 @@ function createVegasHoleResult(params: {
       winnerType: "team",
       winnerPlayerIds: teamA.playerIds,
       isCarryOver: false,
+      innerGameType: "vegas",
+      teamAPlayerIds: teamA.playerIds,
+      teamBPlayerIds: teamB.playerIds,
+      teamAScore,
+      teamBScore,
+      winnerTeamId: "A",
     };
   }
 
@@ -423,6 +468,12 @@ function createVegasHoleResult(params: {
       winnerType: "team",
       winnerPlayerIds: teamB.playerIds,
       isCarryOver: false,
+      innerGameType: "vegas",
+      teamAPlayerIds: teamA.playerIds,
+      teamBPlayerIds: teamB.playerIds,
+      teamAScore,
+      teamBScore,
+      winnerTeamId: "B",
     };
   }
 
@@ -440,6 +491,12 @@ function createVegasHoleResult(params: {
     winnerPlayerIds: [],
     isCarryOver: true,
     tiedPlayerIds: [...teamA.playerIds, ...teamB.playerIds],
+    innerGameType: "vegas",
+    teamAPlayerIds: teamA.playerIds,
+    teamBPlayerIds: teamB.playerIds,
+    teamAScore,
+    teamBScore,
+    winnerTeamId: null,
   };
 }
 
