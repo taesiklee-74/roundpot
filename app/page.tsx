@@ -17,6 +17,8 @@ import ScorecardSection from "./components/ScorecardSection";
 import CurrentGamePreviewCard from "./components/CurrentGamePreviewCard";
 import LatestResultSection from "./components/LatestResultSection";
 import NearWinnerSelector from "./components/NearWinnerSelector";
+import OecdPenaltyInputSection from "./components/OecdPenaltyInputSection";
+import OecdSettingsCard from "./components/OecdSettingsCard";
 import RoundShareCard from "./components/RoundShareCard";
 import { buildRoundSummaryText } from "../src/lib/share/roundSummary";
 import {
@@ -36,6 +38,8 @@ import {
   type CurrentGamePreview,
   type GameResult,
   type Hole,
+  type HoleOecdPenalty,
+  type OecdPlayerStatus,
   type Player,
   type Score,
   type TeamAssignment,
@@ -89,6 +93,12 @@ import {
   type NearGameKind,
   type NearResult,
 } from "../src/lib/betting/near";
+import {
+  calculateOecdSettlementSummary,
+  calculateOecdStatusesForHole,
+  getOecdStatusLabel,
+  upsertOecdPenalty,
+} from "../src/lib/betting/oecd";
 import ExportRoundScoreButton from "./components/ExportRoundScoreButton";
 import MedalPrizeSummaryCard from "./components/MedalPrizeSummaryCard";
 import FinalScorecardExportCard from "./components/FinalScorecardExportCard";
@@ -123,6 +133,7 @@ type SavedRoundState = {
   nearEnabled: boolean;
   nearAmount: number;
   nearResults: NearResult[];
+  oecdPenalties: HoleOecdPenalty[];
   savedAt: string;
 };
 
@@ -655,6 +666,7 @@ function ensureSettingsShape(settings: BettingSettingsV2 | undefined): BettingSe
       hussein: { ...defaults.hussein, ...settings.hussein },
       school: { ...defaults.school, ...settings.school },
       cycle: { ...defaults.cycle, ...settings.cycle },
+      oecd: { ...defaults.oecd, ...settings.oecd },
     },
     settings.mode ?? "skins"
   );
@@ -867,6 +879,125 @@ function getActiveCalculation(params: {
   };
 }
 
+function getScoresBeforeHole(params: {
+  scores: Score[];
+  holes: Hole[];
+  targetHoleNumber: number;
+}): Score[] {
+  const { scores, holes, targetHoleNumber } = params;
+  const holeById = new Map(holes.map((hole) => [hole.id, hole]));
+
+  return scores.map((score) => {
+    const hole = holeById.get(score.holeId);
+
+    if (!hole || hole.holeNumber < targetHoleNumber) {
+      return score;
+    }
+
+    return { ...score, strokes: null };
+  });
+}
+
+function getOecdSettingsForSettlement(settings: BettingSettingsV2) {
+  return {
+    ...settings.oecd,
+    penaltyDestination:
+      settings.mode === "skins" ? settings.oecd.penaltyDestination : "commonPot",
+  };
+}
+
+function getCumulativePrizeTotalsBeforeHole(params: {
+  players: Player[];
+  holes: Hole[];
+  scores: Score[];
+  settings: BettingSettingsV2;
+  vegasTeamAssignments: TeamAssignment[];
+  husseinAssignments: HusseinAssignment[];
+  nearEnabled: boolean;
+  nearAmount: number;
+  nearResults: NearResult[];
+  oecdPenalties: HoleOecdPenalty[];
+  targetHoleNumber: number;
+}): Record<string, number> {
+  const scoresBeforeHole = getScoresBeforeHole({
+    scores: params.scores,
+    holes: params.holes,
+    targetHoleNumber: params.targetHoleNumber,
+  });
+
+  const calculationBeforeHole = getActiveCalculation({
+    players: params.players,
+    holes: params.holes,
+    scores: scoresBeforeHole,
+    settings: params.settings,
+    vegasTeamAssignments: params.vegasTeamAssignments,
+    husseinAssignments: params.husseinAssignments,
+  });
+
+  const gameTotals = calculationBeforeHole
+    ? calculateSettlementSummary({
+        players: params.players,
+        gameResults: { [params.settings.mode]: calculationBeforeHole.gameResult },
+        strokeBet: calculationBeforeHole.strokeBet,
+      })
+    : null;
+
+  const nearBeforeHole = calculateNearSettlementSummary({
+    playerIds: params.players.map((player) => player.id),
+    nearEnabled: params.nearEnabled,
+    nearAmount: params.nearAmount,
+    nearResults: params.nearResults.filter(
+      (result) => result.holeNumber < params.targetHoleNumber
+    ),
+    vegasTeamAssignments: params.vegasTeamAssignments,
+    nearHoleCount: 4,
+  });
+
+  const oecdBeforeHole = calculateOecdSettlementSummary({
+    players: params.players,
+    penalties: params.oecdPenalties.filter(
+      (penalty) => penalty.holeNumber < params.targetHoleNumber
+    ),
+    settings: getOecdSettingsForSettlement(params.settings),
+    gameResult: calculationBeforeHole?.gameResult ?? null,
+  });
+
+  return params.players.reduce<Record<string, number>>((acc, player) => {
+    const gameTotal =
+      gameTotals?.players.find((summary) => summary.playerId === player.id)
+        ?.totalPrizeAmount ?? 0;
+    const nearTotal = nearBeforeHole.byPlayerId[player.id]?.totalAmount ?? 0;
+    const oecdTotal = oecdBeforeHole.byPlayerId[player.id] ?? 0;
+
+    acc[player.id] = gameTotal + nearTotal + oecdTotal;
+    return acc;
+  }, {});
+}
+
+function getCumulativePrizeTotalsByHoleNumber(params: {
+  players: Player[];
+  holes: Hole[];
+  scores: Score[];
+  settings: BettingSettingsV2;
+  vegasTeamAssignments: TeamAssignment[];
+  husseinAssignments: HusseinAssignment[];
+  nearEnabled: boolean;
+  nearAmount: number;
+  nearResults: NearResult[];
+  oecdPenalties: HoleOecdPenalty[];
+}): Record<number, Record<string, number>> {
+  const result: Record<number, Record<string, number>> = {};
+
+  for (const hole of params.holes) {
+    result[hole.holeNumber] = getCumulativePrizeTotalsBeforeHole({
+      ...params,
+      targetHoleNumber: hole.holeNumber,
+    });
+  }
+
+  return result;
+}
+
 function getGameModeLabel(mode: BettingMode): string {
   switch (mode) {
     case "stroke":
@@ -957,6 +1088,7 @@ export default function Home() {
   const [nearEnabled, setNearEnabled] = useState(false);
   const [nearAmount, setNearAmount] = useState(5000);
   const [nearResults, setNearResults] = useState<NearResult[]>([]);
+  const [oecdPenalties, setOecdPenalties] = useState<HoleOecdPenalty[]>([]);
 
   useEffect(() => {
     try {
@@ -1056,6 +1188,9 @@ export default function Home() {
           : 5000
       );
       setNearResults(Array.isArray(saved.nearResults) ? saved.nearResults : []);
+      setOecdPenalties(
+        Array.isArray(saved.oecdPenalties) ? saved.oecdPenalties : []
+      );
       setLastSavedAt(typeof saved.savedAt === "string" ? saved.savedAt : null);
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -1088,6 +1223,7 @@ export default function Home() {
       nearEnabled,
       nearAmount,
       nearResults,
+      oecdPenalties,
       savedAt,
     };
 
@@ -1114,6 +1250,7 @@ export default function Home() {
     nearEnabled,
     nearAmount,
     nearResults,
+    oecdPenalties,
     ]);
 
   useEffect(() => {
@@ -1166,6 +1303,17 @@ export default function Home() {
   [players, nearEnabled, nearAmount, nearResults, vegasTeamAssignments]
   );
 
+  const oecdSettlementSummary = useMemo(
+    () =>
+      calculateOecdSettlementSummary({
+        players,
+        penalties: oecdPenalties,
+        settings: getOecdSettingsForSettlement(settings),
+        gameResult: activeCalculation?.gameResult ?? null,
+      }),
+    [players, oecdPenalties, settings, activeCalculation]
+  );
+
   const roundSummaryText =
     settlementSummary === null
       ? ""
@@ -1176,11 +1324,12 @@ export default function Home() {
           players: settlementSummary.players.map((summary) => {
             const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
             const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
+            const oecdTotalAmount = oecdSettlementSummary.byPlayerId[summary.playerId] ?? 0;
 
             return {
               playerId: summary.playerId,
               playerName: summary.playerName,
-              totalAmount: summary.totalPrizeAmount + nearTotalAmount,
+              totalAmount: summary.totalPrizeAmount + nearTotalAmount + oecdTotalAmount,
             };
           }),
           nearPlayers: nearSettlementSummary.players.map((summary) => ({
@@ -1192,6 +1341,48 @@ export default function Home() {
         });
 
   const currentHole = holes[currentHoleIndex];
+
+  const cumulativeBeforeHoleByNumber = useMemo(
+    () =>
+      getCumulativePrizeTotalsByHoleNumber({
+        players,
+        holes,
+        scores,
+        settings,
+        vegasTeamAssignments,
+        husseinAssignments,
+        nearEnabled,
+        nearAmount,
+        nearResults,
+        oecdPenalties,
+      }),
+    [
+      players,
+      holes,
+      scores,
+      settings,
+      vegasTeamAssignments,
+      husseinAssignments,
+      nearEnabled,
+      nearAmount,
+      nearResults,
+      oecdPenalties,
+    ]
+  );
+
+  const currentOecdStatuses = useMemo<OecdPlayerStatus[]>(() => {
+    if (!currentHole) return [];
+
+    return calculateOecdStatusesForHole({
+      players,
+      holes,
+      currentHole,
+      cumulativeBeforeHoleByPlayer:
+        cumulativeBeforeHoleByNumber[currentHole.holeNumber] ?? {},
+      cumulativeBeforeHoleByNumber,
+      settings: settings.oecd,
+    });
+  }, [players, holes, currentHole, cumulativeBeforeHoleByNumber, settings.oecd]);
 
   function updatePlayerName(index: number, value: string) {
     setPlayerNames((prev) =>
@@ -1465,6 +1656,7 @@ export default function Home() {
     setHusseinAssignments([]);
     setManualFirstHusseinPlayerId("");
     setNearResults([]);
+    setOecdPenalties([]);
     setVegasDrawAnimation(null);
     setCurrentHoleIndex(0);
     setRoundView("play");
@@ -1536,6 +1728,10 @@ export default function Home() {
     amount: nearAmount,
   })
 );
+}
+
+function updateOecdPenalty(penalty: HoleOecdPenalty) {
+  setOecdPenalties((prev) => upsertOecdPenalty(prev, penalty));
 }
 
 function getManualVegasTeamAssignmentForHole(holeId: string) {
@@ -2113,6 +2309,18 @@ function renderModeButton(mode: BettingMode) {
 
   if (!hasStarted) {
     const selectedPlayerCount = Math.max(1, playerNames.filter((name) => name.trim()).length);
+    const oecdEntryFeePerPlayer = (() => {
+      if (settings.mode === "skins") return (settings.skins.amountPerHole * holeCount) / selectedPlayerCount;
+      if (settings.mode === "vegas") return (settings.vegas.amountPerHole * holeCount) / selectedPlayerCount;
+      if (settings.mode === "hussein") return (settings.hussein.amountPerHole * holeCount) / selectedPlayerCount;
+      if (settings.mode === "school") {
+        return ((settings.school.firstPrizeAmount + settings.school.secondPrizeAmount) * holeCount) / selectedPlayerCount;
+      }
+      if (settings.mode === "cycle") {
+        return (settings.cycle.skinsAmount + settings.cycle.husseinAmount + settings.cycle.vegasAmount) / selectedPlayerCount;
+      }
+      return 0;
+    })();
 
     return (
       <main className="min-h-screen bg-neutral-100 p-4 text-neutral-900">
@@ -2418,6 +2626,16 @@ function renderModeButton(mode: BettingMode) {
               </div>
             </section>
           )}
+
+          <OecdPenaltyInputSection
+            enabled={settings.oecd.enabled}
+            hole={currentHole}
+            players={players}
+            statuses={currentOecdStatuses}
+            penalties={oecdPenalties}
+            formatPlainAmount={formatPlainAmount}
+            onChangePenalty={updateOecdPenalty}
+          />
 
           {settings.mode === "vegas" && (
             <section className="rounded-2xl bg-white p-5 shadow-sm">
@@ -2831,6 +3049,14 @@ function renderModeButton(mode: BettingMode) {
             </div>
           </section>
 
+          <OecdSettingsCard
+            settings={settings.oecd}
+            entryFeePerPlayer={oecdEntryFeePerPlayer}
+            isSkinsMode={settings.mode === "skins"}
+            formatPlainAmount={formatPlainAmount}
+            onChange={(value) => updateSettings("oecd", value)}
+          />
+
           <button
             className="w-full rounded-2xl bg-neutral-900 px-5 py-4 text-lg font-bold text-white shadow-sm"
             onClick={startRound}
@@ -2916,7 +3142,9 @@ function renderModeButton(mode: BettingMode) {
 
   const isLastHole = currentHoleIndex >= holes.length - 1;
   const showPrizePool =
-    Boolean(activeCalculation.poolSummary) || nearSettlementSummary.totalPool > 0;
+    Boolean(activeCalculation.poolSummary) ||
+    nearSettlementSummary.totalPool > 0 ||
+    oecdSettlementSummary.commonPotAmount > 0;
   const showRoundHeader =
     roundView !== "play" && roundView !== "latest-result";
 
@@ -2952,7 +3180,9 @@ function renderModeButton(mode: BettingMode) {
   const medalPrizeRows = settlementSummary.players.map((summary) => {
     const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
     const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
-    const totalAmountWithNear = summary.totalPrizeAmount + nearTotalAmount;
+    const oecdTotalAmount = oecdSettlementSummary.byPlayerId[summary.playerId] ?? 0;
+    const totalAmountWithNear =
+      summary.totalPrizeAmount + nearTotalAmount + oecdTotalAmount;
 
     return {
       playerId: summary.playerId,
@@ -3042,6 +3272,40 @@ function renderModeButton(mode: BettingMode) {
       </section>
     ) : null;
 
+  const oecdSettlementSection =
+    settings.oecd.enabled &&
+    (oecdSettlementSummary.totalPenaltyAmount > 0 ||
+      oecdSettlementSummary.commonPotAmount > 0 ||
+      oecdSettlementSummary.winnerPaidAmount > 0) ? (
+      <section className="rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold">OECD 정산</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          수동 입력한 OECD 벌금이 총획득 상금에 반영됩니다.
+        </p>
+        <div className="mt-3 space-y-2">
+          {oecdSettlementSummary.players
+            .filter((summary) => summary.totalAmount !== 0)
+            .map((summary) => (
+              <div key={summary.playerId} className="rounded-xl bg-rose-50 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{getPlayerName(players, summary.playerId)}</span>
+                  <span className="font-bold text-rose-700">{formatAmount(summary.totalAmount)}</span>
+                </div>
+                {summary.breakdowns.length > 0 && (
+                  <p className="mt-1 text-xs text-rose-800">{summary.breakdowns.join(" · ")}</p>
+                )}
+              </div>
+            ))}
+        </div>
+        {oecdSettlementSummary.commonPotAmount > 0 && (
+          <div className="mt-3 rounded-xl bg-neutral-50 p-3 text-sm">
+            <p className="font-semibold">OECD 공통 pot</p>
+            <p>{formatPlainAmount(oecdSettlementSummary.commonPotAmount)}</p>
+          </div>
+        )}
+      </section>
+    ) : null;
+
   const strokeSettlementSection =
     settings.mode === "stroke" && settlementSummary.pairwiseSettlements.length > 0 ? (
       <section className="rounded-2xl bg-white p-5 shadow-sm">
@@ -3115,6 +3379,12 @@ function renderModeButton(mode: BettingMode) {
             2등 상금 이월:{" "}
             {formatPlainAmount(activeCalculation.poolSummary.secondPrizeCarryOver ?? 0)}
           </p>
+        </div>
+      )}
+      {oecdSettlementSummary.commonPotAmount > 0 && (
+        <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
+          <p className="font-semibold">OECD 공통 pot</p>
+          <p>OECD 누적 벌금: {formatPlainAmount(oecdSettlementSummary.commonPotAmount)}</p>
         </div>
       )}
       {nearSettlementSummary.totalPool > 0 && (
@@ -3204,6 +3474,7 @@ function renderModeButton(mode: BettingMode) {
           getPlayerName={getPlayerName}
           handicapAdjustments={currentHandicapAdjustments}
           handicapEligiblePlayers={currentHandicapEligiblePlayers}
+          oecdStatuses={settings.oecd.enabled ? currentOecdStatuses : []}
         />
 
       {settings.mode === "hussein" &&
@@ -3295,16 +3566,22 @@ function renderModeButton(mode: BettingMode) {
           <div className="mt-4 space-y-3">
             {players.map((player) => {
               const scoreToPar = getDisplayScoreToPar(scores, currentHole, player.id);
-              const strokes = currentHole.par + scoreToPar;
+                const oecdStatus = currentOecdStatuses.find(
+                  (status) => status.playerId === player.id
+                );
 
-              return (
+                return (
                 <div
                   key={player.id}
                   className="flex items-center justify-between rounded-xl border border-neutral-200 p-3"
                 >
                   <div>
                     <span className="font-medium">{player.name}</span>
-                    <p className="text-xs text-neutral-500">실제 {strokes}타</p>
+                    <p className="text-xs text-neutral-500">
+                      {settings.oecd.enabled
+                        ? getOecdStatusLabel(oecdStatus)
+                        : "OECD 사용 안함"}
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -3463,7 +3740,8 @@ function renderModeButton(mode: BettingMode) {
               nearResult={latestNearResult}
             />
 
-            {latestPrizeSection}            
+            {latestPrizeSection}
+            {oecdSettlementSection}            
 
             {isLastHole ? (
               <>
