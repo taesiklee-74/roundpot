@@ -12,13 +12,14 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import ScorecardSection from "./components/ScorecardSection";
 import CurrentGamePreviewCard from "./components/CurrentGamePreviewCard";
 import LatestResultSection from "./components/LatestResultSection";
 import NearWinnerSelector from "./components/NearWinnerSelector";
 import OecdPenaltyInputSection from "./components/OecdPenaltyInputSection";
 import OecdSettingsCard from "./components/OecdSettingsCard";
+import CourseLibraryCard from "./components/CourseLibraryCard";
 import RoundShareCard from "./components/RoundShareCard";
 import { buildRoundSummaryText } from "../src/lib/share/roundSummary";
 import {
@@ -103,6 +104,7 @@ import ExportRoundScoreButton from "./components/ExportRoundScoreButton";
 import MedalPrizeSummaryCard from "./components/MedalPrizeSummaryCard";
 import FinalScorecardExportCard from "./components/FinalScorecardExportCard";
 import PrizeAmountRankingCard from "./components/PrizeAmountRankingCard";
+import { loadSavedCourses, saveSavedCourses, type SavedCourse } from "./utils/courseLibrary";
 
 const STORAGE_KEY = "roundpot.refactored.withSchool.v1";
 
@@ -112,6 +114,15 @@ const DEFAULT_PARS: Array<3 | 4 | 5> = [
 ];
 
 const DEFAULT_PLAYER_NAMES = ["로리맥길로이", "넬리코다", "최경주", "김효주"];
+
+type ExtractedCourseInfo = {
+  courseName: string;
+  holeCount: 9 | 18;
+  pars: Array<3 | 4 | 5>;
+  handicapRanks: Array<number | null>;
+  confidence: "low" | "medium" | "high";
+  warnings: string[];
+};
 
 type SavedRoundState = {
   hasStarted: boolean;
@@ -1089,8 +1100,14 @@ export default function Home() {
   const [nearAmount, setNearAmount] = useState(5000);
   const [nearResults, setNearResults] = useState<NearResult[]>([]);
   const [oecdPenalties, setOecdPenalties] = useState<HoleOecdPenalty[]>([]);
+  const [savedCourses, setSavedCourses] = useState<SavedCourse[]>([]);
+  const [courseImageExtracting, setCourseImageExtracting] = useState(false);
+  const [courseImageExtractError, setCourseImageExtractError] = useState("");
+  const [extractedCourseInfo, setExtractedCourseInfo] = useState<ExtractedCourseInfo | null>(null);
 
   useEffect(() => {
+    setSavedCourses(loadSavedCourses());
+
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) {
@@ -1252,6 +1269,13 @@ export default function Home() {
     nearResults,
     oecdPenalties,
     ]);
+
+
+  useEffect(() => {
+    if (!isLoaded || !hasStarted) return;
+
+    saveCurrentCourseToLibrary();
+  }, [isLoaded, hasStarted]);
 
   useEffect(() => {
     if (!hasStarted) return;
@@ -1593,12 +1617,12 @@ export default function Home() {
     recognition.start();
   }
 
-  function handleParImageUpload(file: File | null) {
+  function handleParImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+
     if (!file) return;
 
-    setParHelperMessage(
-      `${file.name} 파일을 받았습니다. 현재 로컬 MVP에는 사진 OCR 엔진이 아직 연결되어 있지 않아 자동 추출은 다음 단계에서 서버/OCR 기능으로 붙이는 것이 안전합니다. 지금은 사진의 Par 숫자를 텍스트 칸에 붙여넣거나 수동 입력해 주세요.`
-    );
+    void extractCourseInfoFromImage(file);
   }
 
   function handleCourseWebLookup() {
@@ -1609,6 +1633,169 @@ export default function Home() {
 
   function updateMode(mode: BettingMode) {
     setSettings((prev) => activateMode(prev, mode));
+  }
+
+
+
+  function loadCourseFromLibrary(course: SavedCourse) {
+    const nextPars = normalizeHolePars(course.pars, course.holeCount);
+    const nextHandicapRanks = normalizeHoleHandicapRanks(
+      course.handicapRanks,
+      course.holeCount
+    );
+
+    setCourseName(course.name);
+    setHoleCount(course.holeCount);
+    setHolePars(nextPars);
+    setHoleHandicapRanks(nextHandicapRanks);
+  }
+
+
+
+
+  function getConfidenceLabel(confidence: ExtractedCourseInfo["confidence"]) {
+    if (confidence === "high") return "높음";
+    if (confidence === "medium") return "보통";
+    return "낮음";
+  }
+
+  function formatExtractedHandicapRanks(ranks: Array<number | null>) {
+    if (ranks.every((rank) => rank === null)) return "핸디캡 미추출";
+    return ranks.map((rank) => rank ?? "-").join(" ");
+  }
+
+  function applyExtractedCourseInfo(course: ExtractedCourseInfo) {
+    const nextHoleCount = course.holeCount === 18 ? 18 : 9;
+    const nextPars = normalizeHolePars(course.pars, nextHoleCount);
+    const nextHandicapRanks = normalizeHoleHandicapRanks(
+      course.handicapRanks,
+      nextHoleCount
+    );
+
+    setCourseName(course.courseName || courseName || "스코어카드 추출 골프장");
+    setHoleCount(nextHoleCount);
+    setHolePars(nextPars);
+    setHoleHandicapRanks(nextHandicapRanks);
+    setExtractedCourseInfo(null);
+    setCourseImageExtractError("");
+  }
+
+  async function extractCourseInfoFromImage(file: File) {
+    setCourseImageExtracting(true);
+    setCourseImageExtractError("");
+    setExtractedCourseInfo(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("courseName", courseName);
+
+      const response = await fetch("/api/course-card/extract", {
+        method: "POST",
+        body: formData,
+      });
+
+      const responseText = await response.text();
+      let data: { course?: ExtractedCourseInfo; error?: string; detail?: string } = {};
+
+      if (responseText) {
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error(
+            response.ok
+              ? "이미지 분석 결과를 해석하지 못했습니다."
+              : `이미지 분석 서버가 JSON이 아닌 응답을 반환했습니다. 상태 코드: ${response.status}`
+          );
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || data.error || `이미지 분석에 실패했습니다. 상태 코드: ${response.status}`
+        );
+      }
+
+      if (!data.course) {
+        throw new Error("이미지 분석 결과가 비어 있습니다.");
+      }
+
+      setExtractedCourseInfo(data.course);
+    } catch (error) {
+      setCourseImageExtractError(
+        error instanceof Error ? error.message : "이미지 분석 중 오류가 발생했습니다."
+      );
+    } finally {
+      setCourseImageExtracting(false);
+    }
+  }
+
+  function handleCourseImageFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+
+    if (!file) return;
+
+    void extractCourseInfoFromImage(file);
+  }
+
+  function saveCurrentCourseToLibrary() {
+    const normalizedName = courseName.trim();
+
+    if (!normalizedName) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const nextPars = normalizeHolePars(holePars, holeCount);
+    const nextHandicapRanks = normalizeHoleHandicapRanks(
+      holeHandicapRanks,
+      holeCount
+    );
+
+    setSavedCourses((prev) => {
+      const existing = prev.find(
+        (course) => course.name.trim().toLowerCase() === normalizedName.toLowerCase()
+      );
+
+      const nextCourse: SavedCourse = {
+        id: existing?.id ?? `course-${Date.now()}`,
+        name: normalizedName,
+        holeCount,
+        pars: nextPars,
+        handicapRanks: nextHandicapRanks,
+        source: "manual",
+        updatedAt: now,
+      };
+
+      const nextCourses = [
+        nextCourse,
+        ...prev.filter(
+          (course) =>
+            course.id !== nextCourse.id &&
+            course.name.trim().toLowerCase() !== normalizedName.toLowerCase()
+        ),
+      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+      saveSavedCourses(nextCourses);
+      return nextCourses;
+    });
+  }
+
+  function deleteCourseFromLibrary(courseId: string) {
+    const targetCourse = savedCourses.find((course) => course.id === courseId);
+
+    if (
+      targetCourse &&
+      !window.confirm(`${targetCourse.name} 골프장 정보를 삭제할까요?`)
+    ) {
+      return;
+    }
+
+    setSavedCourses((prev) => {
+      const nextCourses = prev.filter((course) => course.id !== courseId);
+      saveSavedCourses(nextCourses);
+      return nextCourses;
+    });
   }
 
   function updateSettings<K extends keyof BettingSettingsV2>(
@@ -2336,6 +2523,17 @@ function renderModeButton(mode: BettingMode) {
             </p>
           </header>
 
+
+          <CourseLibraryCard
+            savedCourses={savedCourses}
+            onLoadCourse={loadCourseFromLibrary}
+            onDeleteCourse={deleteCourseFromLibrary}
+          />
+
+
+
+
+
           <section className="rounded-2xl bg-white p-5 shadow-sm">
             <h2 className="text-lg font-bold">라운드 정보</h2>
 
@@ -2461,9 +2659,57 @@ function renderModeButton(mode: BettingMode) {
                 <input
                   type="file"
                   accept="image/*"
-                  className="hidden"
-                  onChange={(event) => handleParImageUpload(event.target.files?.[0] ?? null)}
-                />
+                  className="mt-2 w-full rounded-xl border-2 border-orange-300 bg-orange-50 px-3 py-3 text-sm font-semibold text-orange-900 file:mr-4 file:rounded-lg file:border-0 file:bg-orange-500 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white hover:file:bg-orange-600"
+              onChange={handleCourseImageFileChange}
+              />
+
+            {courseImageExtracting && (
+              <p className="mt-3 rounded-xl bg-orange-50 p-3 text-sm font-semibold text-orange-700">
+                스코어카드 이미지를 분석하는 중입니다...
+              </p>
+            )}
+
+            {courseImageExtractError && (
+              <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">
+                {courseImageExtractError}
+              </p>
+            )}
+
+            {extractedCourseInfo && (
+              <div className="mt-3 rounded-2xl bg-blue-50 p-4 text-sm">
+                <p className="font-bold text-blue-950">
+                  {extractedCourseInfo.courseName || courseName || "골프장명 미추출"}
+                </p>
+                <p className="mt-1 text-blue-800">
+                  {extractedCourseInfo.holeCount}홀 · 신뢰도 {getConfidenceLabel(extractedCourseInfo.confidence)}
+                </p>
+                <div className="mt-3 rounded-xl bg-white p-3">
+                  <p className="text-xs font-semibold text-neutral-500">Par</p>
+                  <p className="mt-1 font-bold">{extractedCourseInfo.pars.join(" ")}</p>
+                </div>
+                <div className="mt-2 rounded-xl bg-white p-3">
+                  <p className="text-xs font-semibold text-neutral-500">홀 핸디캡 / Stroke Index</p>
+                  <p className="mt-1 font-bold">
+                    {formatExtractedHandicapRanks(extractedCourseInfo.handicapRanks)}
+                  </p>
+                </div>
+                {extractedCourseInfo.warnings.length > 0 && (
+                  <div className="mt-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+                    {extractedCourseInfo.warnings.map((warning, index) => (
+                      <p key={`${warning}-${index}`}>- {warning}</p>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white"
+                  onClick={() => applyExtractedCourseInfo(extractedCourseInfo)}
+                >
+                  추출 결과 적용
+                </button>
+              </div>
+            )}
+
               </label>
 
               <p className="mt-3 text-xs text-neutral-500">{parHelperMessage}</p>
@@ -3039,6 +3285,7 @@ function renderModeButton(mode: BettingMode) {
               <p>라스베가스: 니어 라스베가스 팀 니어: 위너가 속한 팀원 각각 니어 상금 수령</p>
             </div>
           </section>
+
 
           <OecdSettingsCard
             settings={settings.oecd}
