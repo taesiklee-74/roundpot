@@ -386,55 +386,74 @@ function getBettingScoresWithHandicap(params: {
       return score;
     }
 
-    const handicapStroke = getHandicapStrokeForHole({
-      handicap: player.handicap,
-      hole,
-    });
+    const adjustment = getHandicapStrokeForHole(player, hole);
 
-    console.log("HANDICAP CHECK", {
-  player: player.name,
-  holeNumber: hole.holeNumber,
-  par: hole.par,
-  handicapRank: hole.handicapRank,
-  handicap: player.handicap,
-  rawStrokes: score.strokes,
-  handicapStroke,
-  adjustedStrokes: Math.max(1, score.strokes - handicapStroke),
-});
-    if (handicapStroke <= 0) {
+    if (adjustment <= 0) {
       return score;
     }
 
     return {
       ...score,
-      strokes: Math.max(1, score.strokes - handicapStroke),
+      strokes: Math.max(1, score.strokes - adjustment),
     };
   });
 }
 
-function isHoleSaved(players: Player[], scores: Score[], holeId: string) {
-  return players.every((player) => {
-    const score = getScoreObject(scores, holeId, player.id);
-    return score?.strokes !== null && score?.strokes !== undefined;
+function formatHandicapSummary(settings: PlayerHandicapSettings): string {
+  if (!settings.enabled) return "핸디 없음";
+
+  const parts: string[] = [];
+
+  if (settings.parValues.length > 0) {
+    parts.push(`파 ${settings.parValues.join("/")}`);
+  } else {
+    parts.push("모든 Par");
+  }
+
+  if (settings.topHandicapHoleCount > 0) {
+    parts.push(`핸디캡 상위 ${settings.topHandicapHoleCount}개 홀`);
+  } else {
+    parts.push("전체 홀");
+  }
+
+  return parts.join(" · ");
+}
+
+function buildRankRows<T extends { id: string; amount: number }>(items: T[]) {
+  const sorted = items
+    .slice()
+    .sort((a, b) => b.amount - a.amount || a.id.localeCompare(b.id));
+
+  let previousAmount: number | null = null;
+  let previousRank = 0;
+
+  return sorted.map((item, index) => {
+    const rank = previousAmount === item.amount ? previousRank : index + 1;
+    previousAmount = item.amount;
+    previousRank = rank;
+
+    return {
+      ...item,
+      rank,
+    };
   });
 }
 
-function getFirstIncompleteHoleIndex(
-  players: Player[],
-  holes: Hole[],
-  scores: Score[]
-) {
-  const index = holes.findIndex((hole) => !isHoleSaved(players, scores, hole.id));
+function buildNearPrizeRows(params: {
+  players: Player[];
+  nearSettlementSummary: ReturnType<typeof calculateNearSettlementSummary>;
+}) {
+  const { players, nearSettlementSummary } = params;
 
-  return index >= 0 ? index : null;
-}
+  const byPlayer = new Map(
+    nearSettlementSummary.players.map((summary) => [summary.playerId, summary])
+  );
 
-function getPlayerName(players: Player[], playerId: string) {
-  return players.find((player) => player.id === playerId)?.name ?? playerId;
-}
-
-function formatTeam(players: Player[], playerIds: string[]) {
-  return playerIds.map((playerId) => getPlayerName(players, playerId)).join(" · ");
+  return players.map((player) => ({
+    id: player.id,
+    name: player.name,
+    amount: byPlayer.get(player.id)?.totalAmount ?? 0,
+  }));
 }
 
 function cloneVegasAssignmentToHole(params: {
@@ -509,53 +528,14 @@ function upsertHusseinAssignment(
   );
 }
 
-type SchoolLatestResultDisplay = {
-  firstPrizeAmount?: number;
-  secondPrizeAmount?: number;
-  firstPrizeWinnerPlayerIds?: string[];
-  secondPrizeWinnerPlayerIds?: string[];
-  firstPrizeCarriedIn?: number;
-  secondPrizeCarriedIn?: number;
-  firstPrizeCarriedOut?: number;
-  secondPrizeCarriedOut?: number;
-};
-
-type VegasLatestResultDisplay = {
-  innerGameType?: "skins" | "hussein" | "vegas";
-  teamAPlayerIds?: string[];
-  teamBPlayerIds?: string[];
-  teamAScore?: number;
-  teamBScore?: number;
-  winnerTeamId?: "A" | "B" | null;
-  assignmentReason?: string;
-};
-
-type HusseinLatestResultDisplay = {
-  innerGameType?: "skins" | "hussein" | "vegas";
-  husseinPlayerId?: string;
-  husseinPlayerScore?: number;
-  restPlayerIds?: string[];
-  restBestScore?: number;
-  restTotalScore?: number;
-  husseinCompareScore?: number;
-  restCompareScore?: number;
-  husseinWinnerType?: "hussein" | "rest" | "tie";
-};
-
-type VegasDrawAnimation = {
-  isRunning: boolean;
-  holeNumber: number;
-  teamAPlayerIds: string[];
-  teamBPlayerIds: string[];
-  message: string;
-};
-
-type SkinsLatestResultDisplay = {
-  innerGameType?: "skins" | "hussein" | "vegas";
-  skinsPlayerIds?: string[];
-  skinsScore?: number | null;
-  skinsResultType?: "win" | "tie";
-};
+function normalizePlayerHandicaps(
+  handicaps: PlayerHandicapSettings[] | undefined,
+  playerCount: number
+): PlayerHandicapSettings[] {
+  return Array.from({ length: playerCount }, (_, index) =>
+    normalizePlayerHandicap(handicaps?.[index])
+  );
+}
 
 function isSkinsDisplayResult(
   mode: BettingMode,
@@ -711,12 +691,7 @@ function getActiveCalculation(params: {
       scores: bettingScores,
       settings: strokeSettings,
     });
-    const latestResult = getLatestStrokeResult({
-      players,
-      holes,
-      scores: bettingScores,
-      settings: strokeSettings,
-    });
+    const latestResult = getLatestStrokeResult(gameResult);
 
     return {
       gameResult,
@@ -749,7 +724,7 @@ function getActiveCalculation(params: {
         scores: bettingScores,
         settings: skinsSettings,
       }),
-      latestResult: getLatestGameResult({ skins: gameResult }),
+      latestResult: getLatestGameResult(gameResult),
       strokeBet: null,
       poolSummary: getSkinsPoolSummary({
         playerCount: players.length,
@@ -760,7 +735,7 @@ function getActiveCalculation(params: {
     };
   }
 
-  if (settings.mode === "vegas") {        
+  if (settings.mode === "vegas") {
     const vegasSettings = { ...settings.vegas, enabled: true };
     const gameResult = calculateVegasBet({
       players,
@@ -779,7 +754,7 @@ function getActiveCalculation(params: {
         settings: vegasSettings,
         teamAssignments: vegasTeamAssignments,
       }),
-      latestResult: getLatestGameResult({ vegas: gameResult }),
+      latestResult: getLatestGameResult(gameResult),
       strokeBet: null,
       poolSummary: getVegasPoolSummary({
         playerCount: players.length,
@@ -797,7 +772,7 @@ function getActiveCalculation(params: {
       holes,
       scores: bettingScores,
       settings: husseinSettings,
-      husseinAssignments,
+      assignments: husseinAssignments,
     });
 
     return {
@@ -807,9 +782,9 @@ function getActiveCalculation(params: {
         holes,
         scores: bettingScores,
         settings: husseinSettings,
-        husseinAssignments,
+        assignments: husseinAssignments,
       }),
-      latestResult: getLatestGameResult({ hussein: gameResult }),
+      latestResult: getLatestGameResult(gameResult),
       strokeBet: null,
       poolSummary: getHusseinPoolSummary({
         playerCount: players.length,
@@ -837,7 +812,7 @@ function getActiveCalculation(params: {
         scores: bettingScores,
         settings: schoolSettings,
       }),
-      latestResult: getLatestGameResult({ school: gameResult }),
+      latestResult: getLatestGameResult(gameResult),
       strokeBet: null,
       poolSummary: getSchoolPoolSummary({
         playerCount: players.length,
@@ -868,7 +843,7 @@ function getActiveCalculation(params: {
       vegasTeamAssignments,
       husseinAssignments,
     }),
-    latestResult: getLatestGameResult({ cycle: gameResult }),
+    latestResult: getLatestGameResult(gameResult),
     strokeBet: null,
     poolSummary: getCyclePoolSummary({
       playerCount: players.length,
@@ -878,6 +853,33 @@ function getActiveCalculation(params: {
     }),
   };
 }
+
+type LatestResultDisplay = NonNullable<ActiveCalculation["latestResult"]> & {
+  innerGameType?: "skins" | "hussein" | "vegas";
+};
+
+type SkinsLatestResultDisplay = LatestResultDisplay & {
+  skinsPlayerIds?: string[];
+  skinsScore?: number | null;
+  skinsResultType?: "win" | "tie";
+};
+
+type HusseinLatestResultDisplay = LatestResultDisplay & {
+  husseinPlayerId?: string;
+  restPlayerIds?: string[];
+  husseinWinnerType?: "hussein" | "rest" | "tie";
+  husseinPlayerScore?: number;
+  restBestScore?: number;
+  restTotalScore?: number;
+};
+
+type VegasLatestResultDisplay = LatestResultDisplay & {
+  teamAPlayerIds?: string[];
+  teamBPlayerIds?: string[];
+  teamAScore?: number;
+  teamBScore?: number;
+  winnerTeamId?: "A" | "B" | null;
+};
 
 function getScoresBeforeHole(params: {
   scores: Score[];
@@ -1013,7 +1015,7 @@ function getGameModeLabel(mode: BettingMode): string {
     case "cycle":
       return "순환게임";
     default:
-      return mode;
+      return "내기";
   }
 }
 
@@ -1021,32 +1023,22 @@ export default function Home() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [hasStarted, setHasStarted] = useState(false);
-
   const [courseName, setCourseName] = useState("테스트 CC");
   const [holeCount, setHoleCount] = useState<9 | 18>(9);
   const [holePars, setHolePars] = useState<Array<3 | 4 | 5>>(
     DEFAULT_PARS.slice(0, 9)
   );
-  const [parInputText, setParInputText] = useState(formatParsForText(DEFAULT_PARS.slice(0, 9)));
-  const [parHelperMessage, setParHelperMessage] = useState(
-    "기본 홀별 Par가 들어가 있습니다. 필요하면 직접 수정하거나 텍스트/음성으로 입력하세요."
-  );
-  const [isListeningPars, setIsListeningPars] = useState(false);
-
+  const [holeHandicapText, setHoleHandicapText] = useState("");
   const [holeHandicapRanks, setHoleHandicapRanks] = useState<Array<number | null>>(
-    () => createDefaultHoleHandicapRanks(9)
+    createDefaultHoleHandicapRanks(9)
   );
-
   const [playerNames, setPlayerNames] = useState(DEFAULT_PLAYER_NAMES);
-
-  const [playerHandicaps, setPlayerHandicaps] = useState<
-    PlayerHandicapSettings[]
-  >(() => createDefaultPlayerHandicaps());
-
-  const [settings, setSettings] = useState<BettingSettingsV2>(() =>
-    activateMode(getInitialSettings(), "skins")
+  const [playerHandicaps, setPlayerHandicaps] = useState<PlayerHandicapSettings[]>(
+    createDefaultPlayerHandicaps()
   );
-
+  const [settings, setSettings] = useState<BettingSettingsV2>(() =>
+    ensureSettingsShape(undefined)
+  );
   const [players, setPlayers] = useState<Player[]>([]);
   const [holes, setHoles] = useState<Hole[]>([]);
   const [scores, setScores] = useState<Score[]>([]);
@@ -1109,62 +1101,31 @@ export default function Home() {
         savedHoleCount
       );
       setHolePars(nextHolePars);
-      setParInputText(formatParsForText(nextHolePars));      
-
-
-      const nextHoleHandicapRanks = normalizeHoleHandicapRanks(
+      const savedHandicapRanks = normalizeHoleHandicapRanks(
         Array.isArray(saved.holeHandicapRanks)
           ? saved.holeHandicapRanks
-          : Array.isArray(saved.holes)
-            ? saved.holes.map((hole) => hole.handicapRank ?? null)
-            : [],
+          : createDefaultHoleHandicapRanks(savedHoleCount),
         savedHoleCount
       );
-
-      setHoleHandicapRanks(nextHoleHandicapRanks);
-
-      const nextPlayerNames =
+      setHoleHandicapRanks(savedHandicapRanks);
+      setHoleHandicapText(
+        savedHandicapRanks.every((rank) => rank === null)
+          ? ""
+          : savedHandicapRanks.map((rank) => rank ?? "").join(" ")
+      );
+      setPlayerNames(
         Array.isArray(saved.playerNames) && saved.playerNames.length > 0
-          ? saved.playerNames.slice(0, 4)
-          : DEFAULT_PLAYER_NAMES;
-
-      setPlayerNames(nextPlayerNames);
-
+          ? saved.playerNames
+          : DEFAULT_PLAYER_NAMES
+      );
       setPlayerHandicaps(
-        nextPlayerNames.map((_, index) =>
-          normalizePlayerHandicap(
-            Array.isArray(saved.playerHandicaps)
-              ? saved.playerHandicaps[index]
-              : Array.isArray(saved.players)
-                ? saved.players[index]?.handicap
-                : null
-          )
-        )
+        normalizePlayerHandicaps(saved.playerHandicaps, DEFAULT_PLAYER_NAMES.length)
       );
-
       setSettings(ensureSettingsShape(saved.settings));
-
-      setPlayers(
-        Array.isArray(saved.players)
-          ? saved.players.map((player) => ({
-              ...player,
-              handicap: normalizePlayerHandicap(player.handicap),
-            }))
-          : []
-      );
-
-      setHoles(
-        Array.isArray(saved.holes)
-          ? saved.holes.map((hole) => ({
-              ...hole,
-              handicapRank: hole.handicapRank ?? null,
-            }))
-          : []
-      );      
+      setPlayers(Array.isArray(saved.players) ? saved.players : []);
+      setHoles(Array.isArray(saved.holes) ? saved.holes : []);
       setScores(Array.isArray(saved.scores) ? saved.scores : []);
-      setCurrentHoleIndex(
-        Number.isInteger(saved.currentHoleIndex) ? Number(saved.currentHoleIndex) : 0
-      );
+      setCurrentHoleIndex(typeof saved.currentHoleIndex === "number" ? saved.currentHoleIndex : 0);
       setVegasTeamAssignments(
         Array.isArray(saved.vegasTeamAssignments) ? saved.vegasTeamAssignments : []
       );
@@ -1182,18 +1143,11 @@ export default function Home() {
           : ""
       );
       setNearEnabled(Boolean(saved.nearEnabled));
-      setNearAmount(
-        typeof saved.nearAmount === "number" && saved.nearAmount >= 0
-          ? saved.nearAmount
-          : 5000
-      );
+      setNearAmount(typeof saved.nearAmount === "number" ? saved.nearAmount : 5000);
       setNearResults(Array.isArray(saved.nearResults) ? saved.nearResults : []);
-      setOecdPenalties(
-        Array.isArray(saved.oecdPenalties) ? saved.oecdPenalties : []
-      );
-      setLastSavedAt(typeof saved.savedAt === "string" ? saved.savedAt : null);
+      setOecdPenalties(Array.isArray(saved.oecdPenalties) ? saved.oecdPenalties : []);
     } catch {
-      window.localStorage.removeItem(STORAGE_KEY);
+      // 저장 데이터가 깨졌을 경우 기본값으로 계속 진행합니다.
     } finally {
       setIsLoaded(true);
     }
@@ -1263,7 +1217,7 @@ export default function Home() {
         behavior: "auto",
       });
     });
-  }, [hasStarted, roundView]);
+  }, [currentHoleIndex, roundView, hasStarted]);
 
   const activeCalculation = useMemo(
     () =>
@@ -1406,313 +1360,96 @@ export default function Home() {
     );
   }
 
-  function updateHoleHandicapRank(index: number, handicapRank: number | null) {
-  setHoleHandicapRanks((prev) => {
-    const nextRanks = normalizeHoleHandicapRanks(prev, holeCount);
-
-    nextRanks[index] =
-      typeof handicapRank === "number" &&
-      Number.isInteger(handicapRank) &&
-      handicapRank >= 1 &&
-      handicapRank <= holeCount
-        ? handicapRank
-        : null;
-
-    return nextRanks;
-    });
-  }
-
-  const updatePlayerHandicap = (
-    playerIndex: number,
-    updater: (handicap: PlayerHandicapSettings) => PlayerHandicapSettings
-  ) => {
-    setPlayerHandicaps((prev) =>
-      DEFAULT_PLAYER_NAMES.map((_, index) =>
-        index === playerIndex
-          ? updater(normalizePlayerHandicap(prev[index]))
-          : normalizePlayerHandicap(prev[index])
+  function updateHolePar(index: number, value: 3 | 4 | 5) {
+    setHolePars((prev) =>
+      normalizeHolePars(
+        prev.map((par, currentIndex) => (currentIndex === index ? value : par)),
+        holeCount
       )
     );
-  };
-
-  const togglePlayerHandicapParValue = (
-    playerIndex: number,
-    parValue: HandicapParValue
-  ) => {
-    updatePlayerHandicap(playerIndex, (handicap) => {
-      const hasParValue = handicap.parValues.includes(parValue);
-
-      return {
-        ...handicap,
-        parValues: hasParValue
-          ? handicap.parValues.filter((value) => value !== parValue)
-          : ([...handicap.parValues, parValue] as HandicapParValue[]).sort(
-              (a, b) => a - b
-            ),
-      };
-    });
-  };
-
-
-  function updateHoleCount(nextHoleCount: 9 | 18) {
-    setHoleCount(nextHoleCount);
-    setHolePars((prev) => {
-      const nextPars = normalizeHolePars(prev, nextHoleCount);
-      setParInputText(formatParsForText(nextPars));
-      return nextPars;
-    });
-    setHoleHandicapRanks((prev) =>
-      normalizeHoleHandicapRanks(prev, nextHoleCount)
-    );
   }
 
-  function updateHolePar(index: number, par: 3 | 4 | 5) {
-    setHolePars((prev) => {
-      const nextPars = normalizeHolePars(prev, holeCount);
-      nextPars[index] = par;
-      setParInputText(formatParsForText(nextPars));
-      return nextPars;
-    });
-  }
+  function updateHoleHandicapText(value: string) {
+    setHoleHandicapText(value);
 
-  function applyParInputText() {
-    const parsedPars = parseParValuesFromText(parInputText);
+    const numbers = value
+      .split(/[\s,./|]+/)
+      .map((item) => Number(item.trim()))
+      .filter((item) => Number.isInteger(item));
 
-    if (parsedPars.length < holeCount) {
-      setParHelperMessage(
-        `${holeCount}개 홀의 Par가 필요합니다. 현재 ${parsedPars.length}개만 인식했습니다.`
-      );
+    if (numbers.length !== holeCount) {
       return;
     }
 
-    const nextPars = normalizeHolePars(parsedPars.slice(0, holeCount), holeCount);
-    setHolePars(nextPars);
-    setParInputText(formatParsForText(nextPars));
-    setParHelperMessage(`${holeCount}개 홀의 Par 정보를 반영했습니다.`);
-  }
+    const uniqueNumbers = new Set(numbers);
+    const isValid =
+      uniqueNumbers.size === holeCount &&
+      numbers.every((item) => item >= 1 && item <= holeCount);
 
-  function startParVoiceInput() {
-    const speechWindow = window as unknown as {
-      SpeechRecognition?: any;
-      webkitSpeechRecognition?: any;
-    };
-    const SpeechRecognitionConstructor =
-      speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-
-    if (!SpeechRecognitionConstructor) {
-      setParHelperMessage(
-        "이 브라우저에서는 앱 내 음성 인식을 지원하지 않습니다. 아이폰에서는 텍스트 입력칸을 터치한 뒤 키보드의 마이크 받아쓰기를 사용하고, 이후 '텍스트 적용'을 눌러 주세요."
-      );
+    if (!isValid) {
       return;
     }
 
-    const recognition = new SpeechRecognitionConstructor();
-    recognition.lang = "ko-KR";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 5;
-    recognition.continuous = false;
-    recognition.interimResults = true;
-
-    setIsListeningPars(true);
-    setParHelperMessage("음성 입력을 듣고 있습니다. 예: 사 삼 오 사 사 사 오 ...");
-
- recognition.onresult = (event: any) => {
-  const candidates: string[] = [];
-
-  for (let resultIndex = 0; resultIndex < event.results.length; resultIndex += 1) {
-    const result = event.results[resultIndex];
-
-    for (let altIndex = 0; altIndex < result.length; altIndex += 1) {
-      const transcript = result[altIndex]?.transcript ?? "";
-      if (transcript.trim()) {
-        candidates.push(transcript);
-      }
-    }
+    setHoleHandicapRanks(numbers);
   }
 
-  let bestTranscript = "";
-  let bestParsedPars: Array<3 | 4 | 5> = [];
+  function applyDefaultHoleHandicapRanks() {
+    const nextRanks = Array.from({ length: holeCount }, (_, index) => index + 1);
 
-  for (const candidate of candidates) {
-    const parsed = parseParValuesFromText(candidate);
-
-    if (parsed.length > bestParsedPars.length) {
-      bestTranscript = candidate;
-      bestParsedPars = parsed;
-    }
-
-    if (parsed.length >= holeCount) {
-      break;
-    }
+    setHoleHandicapRanks(nextRanks);
+    setHoleHandicapText(nextRanks.join(" "));
   }
 
-  if (bestParsedPars.length >= holeCount) {
-    const nextPars = normalizeHolePars(bestParsedPars.slice(0, holeCount), holeCount);
+  function clearHoleHandicapRanks() {
+    const nextRanks = createDefaultHoleHandicapRanks(holeCount);
 
-    setHolePars(nextPars);
-    setParInputText(formatParsForText(nextPars));
-    setParHelperMessage(
-      `음성에서 ${holeCount}개 홀의 Par 정보를 반영했습니다. 인식값: ${bestTranscript}`
+    setHoleHandicapRanks(nextRanks);
+    setHoleHandicapText("");
+  }
+
+  function updatePlayerHandicap(index: number, value: PlayerHandicapSettings) {
+    setPlayerHandicaps((prev) =>
+      normalizePlayerHandicaps(
+        prev.map((item, currentIndex) =>
+          currentIndex === index ? normalizePlayerHandicap(value) : item
+        ),
+        playerNames.length
+      )
     );
-    return;
-  }
-
-  if (bestParsedPars.length > 0) {
-    setParInputText(formatParsForText(bestParsedPars));
-
-    setHolePars((prev) => {
-      const nextPars = normalizeHolePars(prev, holeCount);
-
-      bestParsedPars.forEach((par, index) => {
-        if (index < holeCount) {
-          nextPars[index] = par;
-        }
-      });
-
-      return nextPars;
-    });
-
-    setParHelperMessage(
-      `음성에서 ${bestParsedPars.length}개만 인식했습니다. ${holeCount - bestParsedPars.length}개가 부족합니다. 인식값: ${bestTranscript}`
-    );
-    return;
-  }
-
-  setParHelperMessage(
-    "Par 숫자를 인식하지 못했습니다. 예: '파 사, 파 사, 파 삼, 파 오...'처럼 다시 말해 주세요."
-  );
-};
-    recognition.onerror = () => {
-      setParHelperMessage("음성 인식 중 오류가 났습니다. 다시 시도하거나 수동 입력을 사용하세요.");
-    };
-
-    recognition.onend = () => {
-      setIsListeningPars(false);
-    };
-
-    recognition.start();
-  }
-
-  function handleParImageUpload(file: File | null) {
-    if (!file) return;
-
-    setParHelperMessage(
-      `${file.name} 파일을 받았습니다. 현재 로컬 MVP에는 사진 OCR 엔진이 아직 연결되어 있지 않아 자동 추출은 다음 단계에서 서버/OCR 기능으로 붙이는 것이 안전합니다. 지금은 사진의 Par 숫자를 텍스트 칸에 붙여넣거나 수동 입력해 주세요.`
-    );
-  }
-
-  function handleCourseWebLookup() {
-    setParHelperMessage(
-      "골프장명 기반 웹 자동 조회는 브라우저 보안 정책과 사이트별 구조 차이 때문에 로컬 MVP에서는 안정적으로 직접 수집하기 어렵습니다. 다음 단계에서 서버 API를 붙이면 자동 입력으로 확장할 수 있습니다."
-    );
-  }
-
-  function updateMode(mode: BettingMode) {
-    setSettings((prev) => activateMode(prev, mode));
   }
 
   function updateSettings<K extends keyof BettingSettingsV2>(
-    section: K,
+    key: K,
     value: Partial<BettingSettingsV2[K]>
   ) {
-    setSettings((prev) => ({
-      ...prev,
-      [section]: {
-        ...(prev[section] as object),
-        ...value,
-      },
-    }));
+    setSettings((prev) =>
+      ensureSettingsShape({
+        ...prev,
+        [key]: {
+          ...prev[key],
+          ...value,
+        },
+      })
+    );
   }
 
-  function startRound() {
-    const trimmedNames = playerNames.map((name) => name.trim()).filter(Boolean);
-
-    if (trimmedNames.length < 2) {
-      alert("플레이어는 최소 2명 이상 입력해야 합니다.");
-      return;
-    }
-
-    if (["vegas", "hussein", "cycle"].includes(settings.mode) && trimmedNames.length !== 4) {
-      alert("라스베가스, 후세인, 순환게임은 4명이 있을 때만 사용할 수 있습니다.");
-      return;
-    }
-
-    const nextPlayers: Player[] = trimmedNames.slice(0, 4).map((name, index) => ({
-      id: `p${index + 1}`,
-      name,
-      order: index + 1,
-      handicap: normalizePlayerHandicap(playerHandicaps[index]),
-    }));
-
-    const nextHoles = createHoles(holeCount, holePars, holeHandicapRanks);
-
-    const nextScores = createInitialScores(nextPlayers, nextHoles);
-
-    setPlayers(nextPlayers);
-    setHoles(nextHoles);
-    setScores(nextScores);
-    setVegasTeamAssignments([]);
-    setManualVegasTeamAssignments([]);
-    setHusseinAssignments([]);
-    setManualFirstHusseinPlayerId("");
-    setNearResults([]);
-    setOecdPenalties([]);
-    setVegasDrawAnimation(null);
-    setCurrentHoleIndex(0);
-    setRoundView("play");
-    setHasStarted(true);
+  function selectMode(mode: BettingMode) {
+    setSettings((prev) => activateMode(prev, mode));
   }
 
-  function resetRound() {
-    const confirmed = window.confirm("현재 라운드를 종료하고 새 라운드를 시작할까요? 저장된 진행 내용도 삭제됩니다.");
-    if (!confirmed) return;
-
-    window.localStorage.removeItem(STORAGE_KEY);
-    setHasStarted(false);
-    setCourseName("테스트 CC");
-    setHoleCount(9);
-    setHolePars(DEFAULT_PARS.slice(0, 9));
-    setParInputText(formatParsForText(DEFAULT_PARS.slice(0, 9)));
-    setParHelperMessage("기본 홀별 Par가 들어가 있습니다. 필요하면 직접 수정하거나 텍스트/음성으로 입력하세요.");
-    setIsListeningPars(false);
-    setPlayerNames(DEFAULT_PLAYER_NAMES);
-    setHoleHandicapRanks(createDefaultHoleHandicapRanks(9));
-    setPlayerHandicaps(createDefaultPlayerHandicaps());
-    setSettings(activateMode(getInitialSettings(), "skins"));
-    setPlayers([]);
-    setHoles([]);
-    setScores([]);
-    setCurrentHoleIndex(0);
-    setRoundView("play");
-    setVegasTeamAssignments([]);
-    setManualVegasTeamAssignments([]);
-    setHusseinAssignments([]);
-    setNearEnabled(false);
-    setNearAmount(5000);
-    setNearResults([]);
-    setVegasDrawAnimation(null);
-    setLastSavedAt(null);
-  }
-
-  function updateScoreToPar(hole: Hole, playerId: string, diff: number) {
-    setScores((prevScores) =>
-      prevScores.map((score) => {
-        if (score.holeId !== hole.id || score.playerId !== playerId) {
-          return score;
-        }
-
-        const currentStrokes = score.strokes ?? hole.par;
-        const nextStrokes = Math.max(1, currentStrokes + diff);
-
+  function updateScoreToPar(hole: Hole, playerId: string, scoreToPar: number) {
+    setScores((prev) =>
+      prev.map((score) => {
+        if (score.holeId !== hole.id || score.playerId !== playerId) return score;
         return {
           ...score,
-          strokes: nextStrokes,
+          strokes: Math.max(1, hole.par + scoreToPar),
         };
       })
     );
   }
 
-  function updateNearWinner(params: {
+function updateNearWinner(params: {
   hole: Hole;
   gameKind: NearGameKind;
   winnerPlayerId: string | null;
@@ -1720,14 +1457,13 @@ export default function Home() {
   const { hole, gameKind, winnerPlayerId } = params;
 
   setNearResults((prev) =>
-  upsertNearResult({
-    nearResults: prev,
-    hole,
-    gameKind,
-    winnerPlayerId,
-    amount: nearAmount,
-  })
-);
+    upsertNearResult(prev, {
+      holeId: hole.id,
+      holeNumber: hole.holeNumber,
+      gameKind,
+      winnerPlayerId,
+    })
+  );
 }
 
 function updateOecdPenalty(penalty: HoleOecdPenalty) {
@@ -1735,127 +1471,163 @@ function updateOecdPenalty(penalty: HoleOecdPenalty) {
 }
 
 function getManualVegasTeamAssignmentForHole(holeId: string) {
-  return (
-    manualVegasTeamAssignments.find(
-      (assignment) => assignment.holeId === holeId
-    ) ?? null
-  );
+  return manualVegasTeamAssignments.find(
+    (assignment) => assignment.holeId === holeId
+  ) ?? null;
 }
 
 function updateManualVegasTeamAForHole(holeId: string, teamAPlayerIds: string[]) {
-  const normalizedTeamAPlayerIds = teamAPlayerIds.slice(0, 2);
-  const teamBPlayerIds = players
-    .map((player) => player.id)
-    .filter((playerId) => !normalizedTeamAPlayerIds.includes(playerId));
-
   setManualVegasTeamAssignments((prev) => {
+    const current = prev.find((assignment) => assignment.holeId === holeId);
+    const normalizedTeamA = teamAPlayerIds.slice(0, 2);
+    const teamBPlayerIds = players
+      .map((player) => player.id)
+      .filter((playerId) => !normalizedTeamA.includes(playerId));
+
     const nextAssignment: ManualVegasTeamAssignment = {
       holeId,
-      teamAPlayerIds: normalizedTeamAPlayerIds,
+      teamAPlayerIds: normalizedTeamA,
       teamBPlayerIds,
     };
 
-    const existingIndex = prev.findIndex(
-      (assignment) => assignment.holeId === holeId
-    );
+    if (!current) return [...prev, nextAssignment];
 
-    if (existingIndex === -1) {
-      return [...prev, nextAssignment];
-    }
-
-    return prev.map((assignment, index) =>
-      index === existingIndex ? nextAssignment : assignment
+    return prev.map((assignment) =>
+      assignment.holeId === holeId ? nextAssignment : assignment
     );
   });
 }
 
-function getScoreStrokesForPlayer(
-  scoresToUse: Score[],
-  holeId: string,
-  playerId: string
-): number | null {
-  return (
-    scoresToUse.find(
-      (score) => score.holeId === holeId && score.playerId === playerId
-    )?.strokes ?? null
+  function startRound() {
+    const normalizedNames = playerNames.map((name) => name.trim()).filter(Boolean);
+
+    if (normalizedNames.length !== 4) {
+      alert("4명의 플레이어 이름을 입력해 주세요.");
+      return;
+    }
+
+    const normalizedHandicaps = normalizePlayerHandicaps(
+      playerHandicaps,
+      normalizedNames.length
+    );
+
+    const nextPlayers = normalizedNames.map((name, index) => ({
+      id: `p${index + 1}`,
+      name,
+      order: index,
+      handicap: normalizedHandicaps[index],
+    }));
+    const nextHoles = createHoles(holeCount, holePars, holeHandicapRanks);
+
+    setPlayerNames(normalizedNames);
+    setPlayerHandicaps(normalizedHandicaps);
+    setPlayers(nextPlayers);
+    setHoles(nextHoles);
+    setScores(createInitialScores(nextPlayers, nextHoles));
+    setCurrentHoleIndex(0);
+    setVegasTeamAssignments([]);
+    setManualVegasTeamAPlayerIds([]);
+    setManualVegasTeamAssignments([]);
+    setHusseinAssignments([]);
+    setManualFirstHusseinPlayerId("");
+    setNearResults([]);
+    setOecdPenalties([]);
+    setRoundView("play");
+    setHasStarted(true);
+  }
+
+  function resetRound() {
+    if (!window.confirm("현재 라운드 데이터를 모두 삭제할까요?")) return;
+
+    window.localStorage.removeItem(STORAGE_KEY);
+    setHasStarted(false);
+    setCourseName("테스트 CC");
+    setHoleCount(9);
+    setHolePars(DEFAULT_PARS.slice(0, 9));
+    setHoleHandicapRanks(createDefaultHoleHandicapRanks(9));
+    setHoleHandicapText("");
+    setPlayerNames(DEFAULT_PLAYER_NAMES);
+    setPlayerHandicaps(createDefaultPlayerHandicaps());
+    setSettings(ensureSettingsShape(undefined));
+    setPlayers([]);
+    setHoles([]);
+    setScores([]);
+    setCurrentHoleIndex(0);
+    setRoundView("play");
+    setVegasTeamAssignments([]);
+    setManualVegasTeamAPlayerIds([]);
+    setManualVegasTeamAssignments([]);
+    setHusseinAssignments([]);
+    setManualFirstHusseinPlayerId("");
+    setNearEnabled(false);
+    setNearAmount(5000);
+    setNearResults([]);
+    setOecdPenalties([]);
+    setLastSavedAt(null);
+  }
+
+function createHusseinAssignmentFromMode(hole: Hole, forcedPlayerId?: string) {
+  if (forcedPlayerId) {
+    return createHusseinAssignment({
+      hole,
+      players,
+      holes,
+      scores,
+      settings: { ...settings.hussein, enabled: true },
+      assignments: husseinAssignments,
+      forcedPlayerId,
+    });
+  }
+
+  return createHusseinAssignment({
+    hole,
+    players,
+    holes,
+    scores,
+    settings: { ...settings.hussein, enabled: true },
+    assignments: husseinAssignments,
+  });
+}
+
+function getSavedStrokesForPlayer(holeId: string, playerId: string): number | null {
+  const score = scores.find(
+    (item) => item.holeId === holeId && item.playerId === playerId
+  );
+
+  return score?.strokes ?? null;
+}
+
+function areAllScoresSavedForHole(hole: Hole): boolean {
+  return players.every(
+    (player) => getSavedStrokesForPlayer(hole.id, player.id) !== null
   );
 }
 
-function getTeamStrokesForHole(params: {
-  teamPlayerIds: string[];
-  hole: Hole;
-  scoresToUse: Score[];
-}): number | null {
-  const { teamPlayerIds, hole, scoresToUse } = params;
+function isCurrentHusseinTieAfterSave(hole: Hole): boolean {
+  const assignment =
+    husseinAssignments.find((item) => item.holeId === hole.id) ??
+    createHusseinAssignmentFromMode(hole);
 
-  let total = 0;
+  if (!assignment) return false;
 
-  for (const playerId of teamPlayerIds) {
-    const strokes = getScoreStrokesForPlayer(scoresToUse, hole.id, playerId);
-
-    if (strokes === null) {
-      return null;
-    }
-
-    total += strokes;
-  }
-
-  return total;
-}
-
-function isVegasAssignmentTie(params: {
-  assignment: TeamAssignment;
-  hole: Hole;
-  scoresToUse: Score[];
-}): boolean {
-  const { assignment, hole, scoresToUse } = params;
-
-  const teamAScore = getTeamStrokesForHole({
-    teamPlayerIds: assignment.teams[0].playerIds,
-    hole,
-    scoresToUse,
-  });
-
-  const teamBScore = getTeamStrokesForHole({
-    teamPlayerIds: assignment.teams[1].playerIds,
-    hole,
-    scoresToUse,
-  });
-
-  return teamAScore !== null && teamBScore !== null && teamAScore === teamBScore;
-}
-
-function isHusseinAssignmentTie(params: {
-  assignment: HusseinAssignment;
-  hole: Hole;
-  players: Player[];
-  scoresToUse: Score[];
-}): boolean {
-  const { assignment, hole, players, scoresToUse } = params;
-
-  const husseinStrokes = getScoreStrokesForPlayer(
-    scoresToUse,
+  const husseinScore = getSavedStrokesForPlayer(
     hole.id,
     assignment.husseinPlayerId
   );
 
-  if (husseinStrokes === null) {
+  const restScores = players
+    .filter((player) => player.id !== assignment.husseinPlayerId)
+    .map((player) => getSavedStrokesForPlayer(hole.id, player.id));
+
+  if (husseinScore === null || restScores.some((score) => score === null)) {
     return false;
   }
 
-  const restPlayerIds = players
-    .filter((player) => player.id !== assignment.husseinPlayerId)
-    .map((player) => player.id);
-
-  const restStrokes = restPlayerIds.map((playerId) =>
-    getScoreStrokesForPlayer(scoresToUse, hole.id, playerId)
+  const numericRestStrokes = restScores.filter(
+    (score): score is number => typeof score === "number"
   );
 
-  if (restStrokes.some((strokes) => strokes === null)) {
-    return false;
-  }
-
-  const numericRestStrokes = restStrokes as number[];
+  const husseinStrokes = husseinScore;
 
   const husseinCompareScore =
     settings.hussein.compareMode === "bestScore"
@@ -2052,124 +1824,56 @@ function saveCurrentHoleAndShowResult() {
           })
         : null;
 
-    const nextVegasTeamAssignments = carryAssignment
-      ? upsertVegasTeamAssignment(assignmentsWithCurrentHole, carryAssignment)
-      : assignmentsWithCurrentHole;
+    setVegasTeamAssignments(
+      carryAssignment
+        ? upsertVegasTeamAssignment(assignmentsWithCurrentHole, carryAssignment)
+        : assignmentsWithCurrentHole
+    );
 
-    const commitVegasAssignments = () => {
-      setVegasTeamAssignments(nextVegasTeamAssignments);
-    };
-
-    const shouldShowRandomDrawAnimation =
-      settings.vegas.teamMode === "randomAfterHole" &&
-      storedAssignment === null &&
-      !shouldUseManualAssignment;
-
-    if (shouldShowRandomDrawAnimation) {
-      setVegasDrawAnimation({
-        isRunning: true,
-        holeNumber: currentHole.holeNumber,
-        teamAPlayerIds: assignment.teams[0].playerIds,
-        teamBPlayerIds: assignment.teams[1].playerIds,
-        message: "라스베가스 팀 추첨 중...",
-      });
-
-      window.setTimeout(() => {
-        commitVegasAssignments();
-        setScores(nextScores);
-        setVegasDrawAnimation({
-          isRunning: false,
-          holeNumber: currentHole.holeNumber,
-          teamAPlayerIds: assignment.teams[0].playerIds,
-          teamBPlayerIds: assignment.teams[1].playerIds,
-          message: "라스베가스 팀 결정!",
-        });
-
-        window.setTimeout(() => {
-          setVegasDrawAnimation(null);
-          setRoundView("latest-result");
-        }, 300);
-      }, 300);
-
-      return;
-    }
-
-    commitVegasAssignments();
     finishSave();
     return;
   }
 
   if (settings.mode === "hussein") {
-    const carriedHusseinAssignment = husseinAssignments.find(
-      (assignment) => assignment.holeId === currentHole.id
-    );
+    const storedAssignment =
+      husseinAssignments.find((assignment) => assignment.holeId === currentHole.id) ??
+      null;
 
-    const shouldUseManualFirstHussein =
-      currentHole.holeNumber === 1 && manualFirstHusseinPlayerId.length > 0;
+    const forcedPlayerId =
+      currentHole.holeNumber === 1 ? manualFirstHusseinPlayerId : undefined;
+    const assignment = storedAssignment ?? createHusseinAssignmentFromMode(currentHole, forcedPlayerId);
 
-    if (
-      currentHole.holeNumber === 1 &&
-      !carriedHusseinAssignment &&
-      !shouldUseManualFirstHussein
-    ) {
-      alert("1번 홀 후세인을 선택해 주세요.");
+    if (!assignment) {
+      alert("후세인을 선택해 주세요.");
       return;
     }
-
-    const assignment: HusseinAssignment = carriedHusseinAssignment
-      ? carriedHusseinAssignment
-      : shouldUseManualFirstHussein
-        ? {
-            holeId: currentHole.id,
-            holeNumber: currentHole.holeNumber,
-            husseinPlayerId: manualFirstHusseinPlayerId,
-            reason: "1번 홀 직접 선택",
-          }
-        : createHusseinAssignment({
-            hole: currentHole,
-            players,
-            holes,
-            scores: nextScores,
-            settings: { ...settings.hussein, enabled: true },
-            husseinAssignments,
-          });
 
     const assignmentsWithCurrentHole = upsertHusseinAssignment(
       husseinAssignments,
       assignment
     );
 
-    const husseinResultWithCurrentHole = calculateHusseinBet({
-      players,
-      holes,
-      scores: nextBettingScores,
-      settings: { ...settings.hussein, enabled: true },
-      husseinAssignments: assignmentsWithCurrentHole,
-    });
-
-    const currentHoleResult =
-      husseinResultWithCurrentHole.holeResults.find(
-        (result) => result.holeId === currentHole.id
-      ) ?? null;
-
+    const isTie = isCurrentHusseinTieAfterSave(currentHole);
     const carryAssignment =
-      currentHoleResult?.winnerType === "none" && nextHole
+      isTie && nextHole
         ? cloneHusseinAssignmentToHole({
             assignment,
             nextHole,
           })
         : null;
 
-    const nextHusseinAssignments = carryAssignment
-      ? upsertHusseinAssignment(assignmentsWithCurrentHole, carryAssignment)
-      : assignmentsWithCurrentHole;
+    setHusseinAssignments(
+      carryAssignment
+        ? upsertHusseinAssignment(assignmentsWithCurrentHole, carryAssignment)
+        : assignmentsWithCurrentHole
+    );
 
-    setHusseinAssignments(nextHusseinAssignments);
     finishSave();
     return;
   }
 
-  finishSave();
+  setScores(nextScores);
+  setRoundView("latest-result");
 }
 
 function returnToPlay() {
@@ -2244,39 +1948,45 @@ function goToNextHole() {
   setRoundView("play");
 }
 
-function formatSavedTime(value: string | null) {
-  if (!value) return "아직 저장 전";
-  const date = new Date(value);
-  return date.toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
+  function updatePlayerCount(count: number) {
+    setPlayerNames((prev) => {
+      const next = Array.from({ length: count }, (_, index) =>
+        prev[index] ?? DEFAULT_PLAYER_NAMES[index] ?? `플레이어 ${index + 1}`
+      );
+      return next;
+    });
+    setPlayerHandicaps((prev) => normalizePlayerHandicaps(prev, count));
+  }
 
-function renderModeButton(mode: BettingMode) {
-  const active = settings.mode === mode;
+  function updateHoleCount(count: 9 | 18) {
+    setHoleCount(count);
+    setHolePars((prev) => normalizeHolePars(prev, count));
+    setHoleHandicapRanks((prev) => normalizeHoleHandicapRanks(prev, count));
+    setHoleHandicapText((prev) => {
+      const normalized = normalizeHoleHandicapRanks(
+        prev
+          .split(/[\s,./|]+/)
+          .map((item) => Number(item.trim()))
+          .filter((item) => Number.isInteger(item)),
+        count
+      );
 
-  return (
-    <button
-      key={mode}
-      className={`rounded-2xl px-4 py-3 text-sm font-bold ${
-        active ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-700"
-      }`}
-      onClick={() => updateMode(mode)}
-    >
-      {getModeLabel(mode)}
-    </button>
-  );
-}
+      return normalized.every((rank) => rank === null)
+        ? ""
+        : normalized.map((rank) => rank ?? "").join(" ");
+    });
+  }
+
   const latestResult = activeCalculation?.latestResult ?? null;
-  const latestHandicapAdjustments = useMemo<HandicapScoreAdjustment[]>(() => {
+  const isLastHole = currentHoleIndex === holes.length - 1;
+
+  const latestHandicapAdjustments: HandicapScoreAdjustment[] = useMemo(() => {
     if (!latestResult) {
       return [];
     }
 
     const latestHole = holes.find(
-      (hole) => hole.holeNumber === latestResult.holeNumber
+      (hole) => hole.id === latestResult.holeId
     );
 
     if (!latestHole) {
@@ -2332,231 +2042,243 @@ function renderModeButton(mode: BettingMode) {
               내기 방식을 하나 선택하고 해당 옵션을 설정합니다.
             </p>
             <p className="mt-3 text-xs text-neutral-400">
-              자동 저장: {formatSavedTime(lastSavedAt)}
+              {lastSavedAt ? `마지막 저장: ${new Date(lastSavedAt).toLocaleString()}` : "아직 저장된 라운드 없음"}
             </p>
           </header>
 
           <section className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold">라운드 정보</h2>
-
+            <h2 className="text-lg font-bold">라운드 기본 정보</h2>
             <label className="mt-4 block text-sm font-medium text-neutral-700">
-              골프장명
+              골프장 / 라운드명
             </label>
             <input
               className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
               value={courseName}
               onChange={(event) => setCourseName(event.target.value)}
-              placeholder="예: 남서울 CC"
             />
 
-            <div className="mt-4">
-              <p className="text-sm font-medium text-neutral-700">홀 수</p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
+            <label className="mt-4 block text-sm font-medium text-neutral-700">
+              홀 수
+            </label>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {[9, 18].map((count) => (
                 <button
-                  className={`rounded-xl px-4 py-3 font-semibold ${
-                    holeCount === 9
-                      ? "bg-neutral-900 text-white"
-                      : "bg-neutral-100 text-neutral-700"
+                  key={count}
+                  className={`rounded-xl px-4 py-3 font-bold ${
+                    holeCount === count ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-700"
                   }`}
-                  onClick={() => updateHoleCount(9)}
+                  onClick={() => updateHoleCount(count as 9 | 18)}
                 >
-                  9홀
+                  {count}홀
                 </button>
-                <button
-                  className={`rounded-xl px-4 py-3 font-semibold ${
-                    holeCount === 18
-                      ? "bg-neutral-900 text-white"
-                      : "bg-neutral-100 text-neutral-700"
-                  }`}
-                  onClick={() => updateHoleCount(18)}
-                >
-                  18홀
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-2xl bg-neutral-50 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-bold">홀별 Par 설정</h3>
-                  <p className="mt-1 text-sm text-neutral-500">
-                    수동 입력, 텍스트 붙여넣기, 음성 입력을 지원합니다.
-                  </p>
-                </div>
-                <button
-                  className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-neutral-700"
-                  onClick={handleCourseWebLookup}
-                >
-                  웹 자동 조회
-                </button>
-              </div>
-
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                {holePars.map((par, index) => (
-                  <div key={index} className="rounded-xl bg-white p-2">
-                    <p className="text-xs font-semibold text-neutral-500">{index + 1}번 홀</p>
-                    <select
-                      className="mt-1 w-full rounded-lg border border-neutral-200 px-2 py-2 font-bold outline-none"
-                      value={par}
-                      onChange={(event) =>
-                        updateHolePar(index, Number(event.target.value) as 3 | 4 | 5)
-                      }
-                    >
-                      <option value={3}>Par 3</option>
-                      <option value={4}>Par 4</option>
-                      <option value={5}>Par 5</option>
-                    </select>
-
-                    <input
-                      type="number"
-                      min={1}
-                      max={holeCount}
-                      value={holeHandicapRanks[index] ?? ""}
-                      onChange={(event) => {
-                        const value = event.target.value;
-
-                        updateHoleHandicapRank(
-                          index,
-                          value === "" ? null : Number(value)
-                        );
-                      }}
-                      className="mt-2 w-full rounded-lg border border-neutral-200 px-2 py-2 text-xs outline-none"
-                      placeholder="HCP"
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <label className="mt-4 block text-sm font-medium text-neutral-700">
-                텍스트/음성 입력값
-              </label>
-              <textarea
-                className="mt-2 min-h-20 w-full rounded-xl border border-neutral-300 px-3 py-3 text-sm outline-none focus:border-neutral-900"
-                value={parInputText}
-                onChange={(event) => setParInputText(event.target.value)}
-                placeholder="예: 4 4 3 5 4 4 5 3 4 또는 사 사 삼 오 사 사 오 삼 사"
-              />
-
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  className="rounded-xl bg-neutral-900 px-3 py-3 text-sm font-bold text-white"
-                  onClick={applyParInputText}
-                >
-                  텍스트 적용
-                </button>
-                <button
-                  className={`rounded-xl px-3 py-3 text-sm font-bold ${
-                    isListeningPars
-                      ? "bg-red-600 text-white"
-                      : "bg-blue-600 text-white"
-                  }`}
-                  onClick={startParVoiceInput}
-                >
-                  {isListeningPars ? "듣는 중..." : "음성 입력"}
-                </button>
-              </div>
-
-              <label className="mt-3 block rounded-xl bg-white px-3 py-3 text-center text-sm font-semibold text-neutral-700">
-                사진/스크린샷 파일 선택
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(event) => handleParImageUpload(event.target.files?.[0] ?? null)}
-                />
-              </label>
-
-              <p className="mt-3 text-xs text-neutral-500">{parHelperMessage}</p>
+              ))}
             </div>
           </section>
 
           <section className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold">플레이어</h2>
-            <p className="mt-1 text-sm text-neutral-500">최소 2명, 최대 4명</p>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">홀별 Par 설정</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  각 홀의 기준 타수를 입력합니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl bg-neutral-100 px-3 py-2 text-xs font-semibold"
+                onClick={() => setHolePars(normalizeHolePars(DEFAULT_PARS, holeCount))}
+              >
+                기본값
+              </button>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {Array.from({ length: holeCount }, (_, index) => (
+                <div key={`par-${index}`} className="rounded-xl bg-neutral-50 p-2">
+                  <p className="text-xs font-semibold text-neutral-500">
+                    {index + 1}번 홀
+                  </p>
+                  <div className="mt-2 grid grid-cols-3 gap-1">
+                    {[3, 4, 5].map((par) => (
+                      <button
+                        key={par}
+                        type="button"
+                        className={`rounded-lg py-2 text-xs font-bold ${
+                          holePars[index] === par
+                            ? "bg-neutral-900 text-white"
+                            : "bg-white text-neutral-700"
+                        }`}
+                        onClick={() => updateHolePar(index, par as 3 | 4 | 5)}
+                      >
+                        {par}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">홀 핸디캡 설정</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  핸디캡 난이도 순위를 1번 홀부터 순서대로 입력합니다. 비워두면 홀 핸디캡 조건은 적용하지 않습니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl bg-neutral-100 px-3 py-2 text-xs font-semibold"
+                onClick={applyDefaultHoleHandicapRanks}
+              >
+                1~{holeCount}
+              </button>
+            </div>
+
+            <textarea
+              className="mt-4 min-h-20 w-full rounded-xl border border-neutral-300 px-3 py-3 text-sm outline-none focus:border-neutral-900"
+              value={holeHandicapText}
+              onChange={(event) => updateHoleHandicapText(event.target.value)}
+              placeholder={
+                holeCount === 9
+                  ? "예: 1 2 3 4 5 6 7 8 9"
+                  : "예: 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18"
+              }
+            />
+
+            <div className="mt-3 flex items-center justify-between gap-2 text-xs text-neutral-500">
+              <span>
+                현재 설정: {holeHandicapRanks.every((rank) => rank === null)
+                  ? "없음"
+                  : holeHandicapRanks.map((rank) => rank ?? "-").join(" ")}
+              </span>
+              <button
+                type="button"
+                className="rounded-lg bg-neutral-100 px-3 py-2 font-semibold text-neutral-700"
+                onClick={clearHoleHandicapRanks}
+              >
+                지우기
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">플레이어</h2>
+                <p className="mt-1 text-sm text-neutral-500">
+                  현재 내기 계산은 4인 플레이 기준입니다.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-1 rounded-xl bg-neutral-100 p-1 text-sm font-bold">
+                {[4].map((count) => (
+                  <button
+                    key={count}
+                    className="rounded-lg bg-white px-3 py-2"
+                    onClick={() => updatePlayerCount(count)}
+                  >
+                    {count}명
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {playerNames.map((name, index) => (
+                <input
+                  key={index}
+                  className="w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
+                  value={name}
+                  onChange={(event) => updatePlayerName(index, event.target.value)}
+                  onFocus={() => clearDefaultPlayerNameOnFocus(index)}
+                  placeholder={`플레이어 ${index + 1}`}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-2xl bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold">개인 핸디캡</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              조건에 해당하는 홀에서는 내기 계산에만 1타를 차감합니다. 스코어카드 원타수는 그대로 유지됩니다.
+            </p>
 
             <div className="mt-4 space-y-3">
               {playerNames.map((name, index) => {
-                const handicap = normalizePlayerHandicap(playerHandicaps[index]);
+                const handicap = playerHandicaps[index] ?? createDefaultPlayerHandicap();
 
                 return (
-                  <div key={index} className="rounded-2xl border border-neutral-200 p-3">
-                    <input
-                      className="w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
-                      value={name}
-                      onFocus={() => clearDefaultPlayerNameOnFocus(index)}
-                      onChange={(event) => updatePlayerName(index, event.target.value)}
-                      placeholder={`플레이어 ${index + 1}`}
-                    />
-
-                    <div className="mt-3 rounded-2xl bg-neutral-50 p-3">
-                      <label className="flex items-center gap-2 text-sm font-bold">
+                  <div key={`handicap-${index}`} className="rounded-2xl bg-neutral-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-bold">{name || `플레이어 ${index + 1}`}</p>
+                        <p className="mt-1 text-xs text-neutral-500">
+                          {formatHandicapSummary(handicap)}
+                        </p>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm font-semibold">
+                        사용
                         <input
                           type="checkbox"
                           checked={handicap.enabled}
                           onChange={(event) =>
-                            updatePlayerHandicap(index, (prev) => ({
-                              ...prev,
+                            updatePlayerHandicap(index, {
+                              ...handicap,
                               enabled: event.target.checked,
-                            }))
+                            })
                           }
                         />
-                        핸디 적용
                       </label>
-
-                      {handicap.enabled && (
-                        <div className="mt-3 space-y-3">
-                          <div>
-                            <p className="text-xs font-semibold text-neutral-500">
-                              Par 기준 핸디
-                            </p>
-                            <div className="mt-2 grid grid-cols-3 gap-2">
-                              {([3, 4, 5] as HandicapParValue[]).map((parValue) => (
-                                <button
-                                  key={parValue}
-                                  type="button"
-                                  className={`rounded-xl px-3 py-2 text-sm font-bold ${
-                                    handicap.parValues.includes(parValue)
-                                      ? "bg-blue-700 text-white"
-                                      : "bg-white text-neutral-700"
-                                  }`}
-                                  onClick={() =>
-                                    togglePlayerHandicapParValue(index, parValue)
-                                  }
-                                >
-                                  Par {parValue}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="text-xs font-semibold text-neutral-500">
-                              핸디캡 상위 n개 홀
-                            </label>
-                            <input
-                              type="number"
-                              min={0}
-                              max={holeCount}
-                              value={handicap.topHandicapHoleCount || ""}
-                              onChange={(event) => {
-                                const value = event.target.value;
-
-                                updatePlayerHandicap(index, (prev) => ({
-                                  ...prev,
-                                  topHandicapHoleCount:
-                                    value === "" ? 0 : Math.max(0, Number(value)),
-                                }));
-                              }}
-                              className="mt-1 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm"
-                              placeholder="예: 3"
-                            />
-                            <p className="mt-1 text-xs text-neutral-400">
-                              예: 3 입력 시 핸디캡 순번 1~3번 홀에서 1타 차감
-                            </p>
-                          </div>
-                        </div>
-                      )}
                     </div>
+
+                    <fieldset className="mt-3" disabled={!handicap.enabled}>
+                      <p className="text-xs font-semibold text-neutral-500">적용 Par</p>
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        {[3, 4, 5].map((par) => {
+                          const checked = handicap.parValues.includes(par as HandicapParValue);
+
+                          return (
+                            <button
+                              key={par}
+                              type="button"
+                              className={`rounded-xl px-3 py-2 text-sm font-bold disabled:opacity-40 ${
+                                checked ? "bg-neutral-900 text-white" : "bg-white text-neutral-700"
+                              }`}
+                              onClick={() => {
+                                const nextParValues = checked
+                                  ? handicap.parValues.filter((value) => value !== par)
+                                  : [...handicap.parValues, par as HandicapParValue];
+
+                                updatePlayerHandicap(index, {
+                                  ...handicap,
+                                  parValues: nextParValues,
+                                });
+                              }}
+                            >
+                              Par {par}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <label className="mt-3 block text-xs font-semibold text-neutral-500">
+                        핸디캡 상위 N개 홀
+                      </label>
+                      <input
+                        type="number"
+                        className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900 disabled:bg-neutral-100"
+                        min={0}
+                        max={holeCount}
+                        value={handicap.topHandicapHoleCount}
+                        onChange={(event) =>
+                          updatePlayerHandicap(index, {
+                            ...handicap,
+                            topHandicapHoleCount: Math.max(0, Number(event.target.value || 0)),
+                          })
+                        }
+                      />
+                    </fieldset>
                   </div>
                 );
               })}
@@ -2564,9 +2286,26 @@ function renderModeButton(mode: BettingMode) {
           </section>
 
           <section className="rounded-2xl bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold">내기 방식 선택</h2>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              {(["stroke", "skins", "vegas", "hussein", "school", "cycle"] as BettingMode[]).map(renderModeButton)}
+            <h2 className="text-lg font-bold">내기 방식</h2>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {([
+                ["skins", "스킨스"],
+                ["vegas", "라스베가스"],
+                ["hussein", "후세인"],
+                ["school", "학교"],
+                ["stroke", "스트로크"],
+                ["cycle", "순환게임"],
+              ] as Array<[BettingMode, string]>).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  className={`rounded-xl px-3 py-3 font-bold ${
+                    settings.mode === mode ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-700"
+                  }`}
+                  onClick={() => selectMode(mode)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </section>
 
@@ -2574,7 +2313,7 @@ function renderModeButton(mode: BettingMode) {
             <section className="rounded-2xl bg-white p-5 shadow-sm">
               <h2 className="text-lg font-bold">스트로크 옵션</h2>
               <label className="mt-4 block text-sm font-medium text-neutral-700">
-                1타당 금액
+                타당 금액
               </label>
               <input
                 type="number"
@@ -2627,16 +2366,6 @@ function renderModeButton(mode: BettingMode) {
             </section>
           )}
 
-          <OecdPenaltyInputSection
-            enabled={settings.oecd.enabled}
-            hole={currentHole}
-            players={players}
-            statuses={currentOecdStatuses}
-            penalties={oecdPenalties}
-            formatPlainAmount={formatPlainAmount}
-            onChangePenalty={updateOecdPenalty}
-          />
-
           {settings.mode === "vegas" && (
             <section className="rounded-2xl bg-white p-5 shadow-sm">
               <h2 className="text-lg font-bold">라스베가스 옵션</h2>
@@ -2665,57 +2394,54 @@ function renderModeButton(mode: BettingMode) {
                   }
                 />
               </label>
-              <div className="mt-4 rounded-xl bg-blue-50 p-3 text-sm text-blue-900">
-                <p className="font-semibold">팀 결정 방식</p>
-                <div className="mt-2 grid gap-2">
-                  {[
-                    {
-                      key: "previousRanks",
-                      label: "전홀 1,4등 vs 2,3등",
-                      teamMode: "previousRanks" as const,
-                      teamAssignmentMode: "auto" as const,
-                    },
-                    {
-                      key: "randomAfterHole",
-                      label: "홀 종료 후 랜덤 드로우",
-                      teamMode: "randomAfterHole" as const,
-                      teamAssignmentMode: "auto" as const,
-                    },
-                    {
-                      key: "manualAfterHole",
-                      label: "홀 종료 후 직접 입력",
-                      teamMode: "randomAfterHole" as const,
-                      teamAssignmentMode: "manual" as const,
-                    },
-                  ].map((option) => {
-                    const isSelected =
-                      settings.vegas.teamMode === option.teamMode &&
-                      (settings.vegas.teamAssignmentMode ?? "auto") ===
-                        option.teamAssignmentMode;
-
-                    return (
-                      <button
-                        key={option.key}
-                        type="button"
-                        className={`rounded-xl px-3 py-3 text-sm font-bold ${
-                          isSelected
-                            ? "bg-orange-600 text-white"
-                            : "bg-white text-orange-900"
-                        }`}
-                        onClick={() =>
-                          updateSettings("vegas", {
-                            teamMode: option.teamMode,
-                            teamAssignmentMode: option.teamAssignmentMode,
-                          })
-                        }
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="mt-3">사전 총액: {formatPlainAmount(settings.vegas.amountPerHole * holeCount)}</p>
-                <p>1인 선납 예상: {formatPlainAmount((settings.vegas.amountPerHole * holeCount) / 4)}</p>
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                팀 구성 방식
+              </label>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                {([
+                  ["previousRanks", "전 홀 성적 1·4등 vs 2·3등"],
+                  ["randomAfterHole", "홀 종료 후 랜덤 드로우"],
+                ] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`rounded-xl px-3 py-3 text-left font-bold ${
+                      settings.vegas.teamMode === value
+                        ? "bg-neutral-900 text-white"
+                        : "bg-neutral-100 text-neutral-700"
+                    }`}
+                    onClick={() => updateSettings("vegas", { teamMode: value })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                팀 입력 방식
+              </label>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                {([
+                  ["auto", "자동 결정"],
+                  ["manual", "직접 입력"],
+                ] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`rounded-xl px-3 py-3 text-left font-bold ${
+                      (settings.vegas.teamAssignmentMode ?? "auto") === value
+                        ? "bg-neutral-900 text-white"
+                        : "bg-neutral-100 text-neutral-700"
+                    }`}
+                    onClick={() => updateSettings("vegas", { teamAssignmentMode: value })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">
+                <p className="font-semibold">사전 모금</p>
+                <p>사전 총액: {formatPlainAmount(settings.vegas.amountPerHole * holeCount)}</p>
+                <p>1인 선납 예상: {formatPlainAmount((settings.vegas.amountPerHole * holeCount) / selectedPlayerCount)}</p>
               </div>
             </section>
           )}
@@ -2748,55 +2474,54 @@ function renderModeButton(mode: BettingMode) {
                   }
                 />
               </label>
-              <div className="mt-4 rounded-xl bg-purple-50 p-3 text-sm text-purple-900">
-                <p className="font-semibold">후세인 선정 방식</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                후세인 선정 기준
+              </label>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                {([
+                  ["previousFirst", "전 홀 1등"],
+                  ["previousSecond", "전 홀 2등"],
+                ] as const).map(([value, label]) => (
                   <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.hussein.selector === "previousFirst"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
+                    key={value}
+                    type="button"
+                    className={`rounded-xl px-3 py-3 text-left font-bold ${
+                      settings.hussein.selector === value
+                        ? "bg-neutral-900 text-white"
+                        : "bg-neutral-100 text-neutral-700"
                     }`}
-                    onClick={() => updateSettings("hussein", { selector: "previousFirst" })}
+                    onClick={() => updateSettings("hussein", { selector: value })}
                   >
-                    전홀 1등
+                    {label}
                   </button>
+                ))}
+              </div>
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                비교 방식
+              </label>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                {([
+                  ["bestScore", "후세인 1명 vs 3명팀 베스트 스코어"],
+                  ["tripleSum", "후세인 점수×3 vs 3명팀 합산"],
+                ] as const).map(([value, label]) => (
                   <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.hussein.selector === "previousSecond"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
+                    key={value}
+                    type="button"
+                    className={`rounded-xl px-3 py-3 text-left font-bold ${
+                      settings.hussein.compareMode === value
+                        ? "bg-neutral-900 text-white"
+                        : "bg-neutral-100 text-neutral-700"
                     }`}
-                    onClick={() => updateSettings("hussein", { selector: "previousSecond" })}
+                    onClick={() => updateSettings("hussein", { compareMode: value })}
                   >
-                    전홀 2등
+                    {label}
                   </button>
-                </div>
-                <p className="mt-4 font-semibold">승부 방식</p>
-                <div className="mt-2 grid grid-cols-1 gap-2">
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.hussein.compareMode === "bestScore"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
-                    }`}
-                    onClick={() => updateSettings("hussein", { compareMode: "bestScore" })}
-                  >
-                    후세인 vs 3명 중 베스트
-                  </button>
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.hussein.compareMode === "tripleSum"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
-                    }`}
-                    onClick={() => updateSettings("hussein", { compareMode: "tripleSum" })}
-                  >
-                    후세인×3 vs 3명 합산
-                  </button>
-                </div>
-                <p className="mt-3">사전 총액: {formatPlainAmount(settings.hussein.amountPerHole * holeCount)}</p>
-                <p>1인 선납 예상: {formatPlainAmount((settings.hussein.amountPerHole * holeCount) / 4)}</p>
+                ))}
+              </div>
+              <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">
+                <p className="font-semibold">사전 모금</p>
+                <p>사전 총액: {formatPlainAmount(settings.hussein.amountPerHole * holeCount)}</p>
+                <p>1인 선납 예상: {formatPlainAmount((settings.hussein.amountPerHole * holeCount) / selectedPlayerCount)}</p>
               </div>
             </section>
           )}
@@ -2804,10 +2529,6 @@ function renderModeButton(mode: BettingMode) {
           {settings.mode === "school" && (
             <section className="rounded-2xl bg-white p-5 shadow-sm">
               <h2 className="text-lg font-bold">학교 옵션</h2>
-              <p className="mt-1 text-sm text-neutral-500">
-                1등 상금과 2등 상금을 따로 지급하는 스킨스 변형 게임입니다.
-              </p>
-
               <label className="mt-4 block text-sm font-medium text-neutral-700">
                 1등 상금
               </label>
@@ -2823,7 +2544,6 @@ function renderModeButton(mode: BettingMode) {
                 min={0}
                 step={1000}
               />
-
               <label className="mt-4 block text-sm font-medium text-neutral-700">
                 2등 상금
               </label>
@@ -2839,7 +2559,6 @@ function renderModeButton(mode: BettingMode) {
                 min={0}
                 step={1000}
               />
-
               <label className="mt-4 flex items-center justify-between rounded-xl bg-neutral-50 p-3">
                 <span className="font-medium">동점 시 이월</span>
                 <input
@@ -2850,23 +2569,10 @@ function renderModeButton(mode: BettingMode) {
                   }
                 />
               </label>
-
-              <div className="mt-4 rounded-xl bg-orange-50 p-3 text-sm text-orange-900">
+              <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">
                 <p className="font-semibold">사전 모금</p>
-                <p>
-                  사전 총액: {formatPlainAmount(
-                    (settings.school.firstPrizeAmount + settings.school.secondPrizeAmount) * holeCount
-                  )}
-                </p>
-                <p>
-                  1인 선납 예상: {formatPlainAmount(
-                    ((settings.school.firstPrizeAmount + settings.school.secondPrizeAmount) * holeCount) /
-                      selectedPlayerCount
-                  )}
-                </p>
-                <p className="mt-2 text-xs">
-                  이월 상태는 예: 3학년 2반처럼 표시됩니다.
-                </p>
+                <p>사전 총액: {formatPlainAmount((settings.school.firstPrizeAmount + settings.school.secondPrizeAmount) * holeCount)}</p>
+                <p>1인 선납 예상: {formatPlainAmount(((settings.school.firstPrizeAmount + settings.school.secondPrizeAmount) * holeCount) / selectedPlayerCount)}</p>
               </div>
             </section>
           )}
@@ -2875,140 +2581,154 @@ function renderModeButton(mode: BettingMode) {
             <section className="rounded-2xl bg-white p-5 shadow-sm">
               <h2 className="text-lg font-bold">순환게임 옵션</h2>
               <p className="mt-1 text-sm text-neutral-500">
-                스킨스 → 후세인 → 라스베가스 순서로 반복합니다.
+                스킨스 → 후세인 → 라스베가스를 홀마다 순환합니다. 동점 시
+                이월 상태는 예: 3학년 2반처럼 표시됩니다.
               </p>
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-xs font-semibold">스킨스</label>
-                  <input
-                    type="number"
-                    className="mt-1 w-full rounded-xl border border-neutral-300 px-2 py-2 text-sm"
-                    value={settings.cycle.skinsAmount}
-                    onChange={(event) => updateSettings("cycle", { skinsAmount: Number(event.target.value || 0) })}
-                    step={1000}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold">후세인</label>
-                  <input
-                    type="number"
-                    className="mt-1 w-full rounded-xl border border-neutral-300 px-2 py-2 text-sm"
-                    value={settings.cycle.husseinAmount}
-                    onChange={(event) => updateSettings("cycle", { husseinAmount: Number(event.target.value || 0) })}
-                    step={1000}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold">라스베가스</label>
-                  <input
-                    type="number"
-                    className="mt-1 w-full rounded-xl border border-neutral-300 px-2 py-2 text-sm"
-                    value={settings.cycle.vegasAmount}
-                    onChange={(event) => updateSettings("cycle", { vegasAmount: Number(event.target.value || 0) })}
-                    step={1000}
-                  />
-                </div>
-              </div>
-              <div className="mt-4 rounded-xl bg-purple-50 p-3 text-sm text-purple-900">
-                <p className="font-semibold">무승부 처리</p>
+
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                스킨스 기본 상금
+              </label>
+              <input
+                type="number"
+                className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
+                value={settings.cycle.skinsAmount}
+                onChange={(event) =>
+                  updateSettings("cycle", {
+                    skinsAmount: Number(event.target.value || 0),
+                  })
+                }
+                min={0}
+                step={1000}
+              />
+
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                후세인 기본 상금
+              </label>
+              <input
+                type="number"
+                className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
+                value={settings.cycle.husseinAmount}
+                onChange={(event) =>
+                  updateSettings("cycle", {
+                    husseinAmount: Number(event.target.value || 0),
+                  })
+                }
+                min={0}
+                step={1000}
+              />
+
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                라스베가스 기본 상금
+              </label>
+              <input
+                type="number"
+                className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900"
+                value={settings.cycle.vegasAmount}
+                onChange={(event) =>
+                  updateSettings("cycle", {
+                    vegasAmount: Number(event.target.value || 0),
+                  })
+                }
+                min={0}
+                step={1000}
+              />
+
+              <div className="mt-4 rounded-xl bg-neutral-50 p-3">
+                <p className="text-sm font-bold">동점 처리</p>
                 <div className="mt-2 grid grid-cols-1 gap-2">
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.cycle.tieMode === "carryOnlyNextGame"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
-                    }`}
-                    onClick={() => updateSettings("cycle", { tieMode: "carryOnlyNextGame" })}
-                  >
-                    상금만 이월하고 다음 게임 진행
-                  </button>
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.cycle.tieMode === "carryAndRepeatSameGame"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
-                    }`}
-                    onClick={() => updateSettings("cycle", { tieMode: "carryAndRepeatSameGame" })}
-                  >
-                    상금 이월 + 같은 게임 유지
-                  </button>
+                  {([
+                    ["carryOnlyNextGame", "상금만 이월하고 다음 게임 진행"],
+                    ["carryAndRepeatSameGame", "상금 이월 + 같은 게임 유지"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`rounded-xl px-3 py-2 text-left text-sm font-semibold ${
+                        settings.cycle.tieMode === value
+                          ? "bg-neutral-900 text-white"
+                          : "bg-white text-neutral-700"
+                      }`}
+                      onClick={() => updateSettings("cycle", { tieMode: value })}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div className="mt-4 rounded-xl bg-purple-50 p-3 text-sm text-purple-900">
-                <p className="font-semibold">후세인 옵션</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
+
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                후세인 선정 기준
+              </label>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                {([
+                  ["previousFirst", "전 홀 1등"],
+                  ["previousSecond", "전 홀 2등"],
+                ] as const).map(([value, label]) => (
                   <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.cycle.husseinSelector === "previousFirst"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
+                    key={value}
+                    type="button"
+                    className={`rounded-xl px-3 py-3 text-left font-bold ${
+                      settings.cycle.husseinSelector === value
+                        ? "bg-neutral-900 text-white"
+                        : "bg-white text-neutral-700"
                     }`}
-                    onClick={() => updateSettings("cycle", { husseinSelector: "previousFirst" })}
+                    onClick={() => updateSettings("cycle", { husseinSelector: value })}
                   >
-                    전홀 1등
+                    {label}
                   </button>
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.cycle.husseinSelector === "previousSecond"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
-                    }`}
-                    onClick={() => updateSettings("cycle", { husseinSelector: "previousSecond" })}
-                  >
-                    전홀 2등
-                  </button>
-                </div>
-                <div className="mt-2 grid grid-cols-1 gap-2">
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.cycle.husseinCompareMode === "bestScore"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
-                    }`}
-                    onClick={() => updateSettings("cycle", { husseinCompareMode: "bestScore" })}
-                  >
-                    후세인 vs 3명 중 베스트
-                  </button>
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.cycle.husseinCompareMode === "tripleSum"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
-                    }`}
-                    onClick={() => updateSettings("cycle", { husseinCompareMode: "tripleSum" })}
-                  >
-                    후세인×3 vs 3명 합산
-                  </button>
-                </div>
+                ))}
               </div>
-              <div className="mt-4 rounded-xl bg-purple-50 p-3 text-sm text-purple-900">
-                <p className="font-semibold">라스베가스 팀 방식</p>
-                <div className="mt-2 grid grid-cols-1 gap-2">
+
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                후세인 비교 방식
+              </label>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                {([
+                  ["bestScore", "후세인 1명 vs 3명팀 베스트 스코어"],
+                  ["tripleSum", "후세인 점수×3 vs 3명팀 합산"],
+                ] as const).map(([value, label]) => (
                   <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.cycle.vegasTeamMode === "randomAfterHole"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
+                    key={value}
+                    type="button"
+                    className={`rounded-xl px-3 py-3 text-left font-bold ${
+                      settings.cycle.husseinCompareMode === value
+                        ? "bg-neutral-900 text-white"
+                        : "bg-white text-neutral-700"
                     }`}
-                    onClick={() => updateSettings("cycle", { vegasTeamMode: "randomAfterHole" })}
+                    onClick={() => updateSettings("cycle", { husseinCompareMode: value })}
                   >
-                    홀 종료 후 랜덤 드로우
+                    {label}
                   </button>
-                  <button
-                    className={`rounded-xl px-3 py-2 font-semibold ${
-                      settings.cycle.vegasTeamMode === "previousRanks"
-                        ? "bg-purple-600 text-white"
-                        : "bg-white text-purple-900"
-                    }`}
-                    onClick={() => updateSettings("cycle", { vegasTeamMode: "previousRanks" })}
-                  >
-                    전홀 1·4등 vs 2·3등
-                  </button>
-                </div>
+                ))}
               </div>
-              <div className="mt-4 rounded-xl bg-purple-50 p-3 text-sm text-purple-900">
-                <p className="font-semibold">기본 사전 모금</p>
-                <p>기본 3홀 세트: {formatPlainAmount(settings.cycle.skinsAmount + settings.cycle.husseinAmount + settings.cycle.vegasAmount)}</p>
+
+              <label className="mt-4 block text-sm font-medium text-neutral-700">
+                라스베가스 팀 구성 방식
+              </label>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                {([
+                  ["previousRanks", "전 홀 성적 1·4등 vs 2·3등"],
+                  ["randomAfterHole", "홀 종료 후 랜덤 드로우"],
+                ] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`rounded-xl px-3 py-3 text-left font-bold ${
+                      settings.cycle.vegasTeamMode === value
+                        ? "bg-neutral-900 text-white"
+                        : "bg-white text-neutral-700"
+                    }`}
+                    onClick={() => updateSettings("cycle", { vegasTeamMode: value })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">
+                <p className="font-semibold">사전 모금</p>
+                <p>사전 총액: {formatPlainAmount(settings.cycle.skinsAmount + settings.cycle.husseinAmount + settings.cycle.vegasAmount)}</p>
+                <p>1인 선납 예상: {formatPlainAmount((settings.cycle.skinsAmount + settings.cycle.husseinAmount + settings.cycle.vegasAmount) / selectedPlayerCount)}</p>
                 <p>참고: 실제 이월 여부에 따라 지급 타이밍이 달라집니다.</p>
               </div>
             </section>
@@ -3017,7 +2737,7 @@ function renderModeButton(mode: BettingMode) {
           <section className="rounded-2xl bg-white p-5 shadow-sm">
             <h2 className="text-lg font-bold">니어 옵션</h2>
             <p className="mt-1 text-sm text-neutral-500">
-                파3 홀에서 모든 게임에 적용됩니다.
+              니어 상금은 정산에는 반영되지만 내기 게임 승패 계산에는 반영하지 않습니다.
             </p>
 
             <label className="mt-4 flex items-center justify-between rounded-xl bg-neutral-50 p-3">
@@ -3034,7 +2754,7 @@ function renderModeButton(mode: BettingMode) {
             </label>
             <input
               type="number"
-              className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-400"
+              className="mt-2 w-full rounded-xl border border-neutral-300 px-3 py-3 outline-none focus:border-neutral-900 disabled:bg-neutral-100"
               value={nearAmount}
               onChange={(event) => setNearAmount(Number(event.target.value || 0))}
               min={0}
@@ -3138,24 +2858,134 @@ function renderModeButton(mode: BettingMode) {
   getHandicapEligiblePlayersForHole({
     players,
     hole: currentHole,
+    scores,
   });
 
-  const isLastHole = currentHoleIndex >= holes.length - 1;
-  const showPrizePool =
-    Boolean(activeCalculation.poolSummary) ||
-    nearSettlementSummary.totalPool > 0 ||
-    oecdSettlementSummary.commonPotAmount > 0;
-  const showRoundHeader =
-    roundView !== "play" && roundView !== "latest-result";
+  const currentPoolSummary = activeCalculation.poolSummary;
 
-  const roundViewTitle: Record<RoundView, string> = {
-    play: `${getModeLabel(settings.mode)} 진행 중`,
-    "latest-result": "방금 홀 결과",
-    settlement: "현재 상금",
-    scorecard: "전체 스코어카드",
-    pool: "상금 풀",
-    "final-share": "최종 정산",
-  };
+  const prizePoolSection = currentPoolSummary ? (
+    <section className="rounded-2xl bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-bold">상금 풀</h2>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div className="rounded-xl bg-neutral-50 p-3">
+          <p className="text-neutral-500">사전 총액</p>
+          <p className="font-bold">{formatPlainAmount(currentPoolSummary.totalPool)}</p>
+        </div>
+        <div className="rounded-xl bg-neutral-50 p-3">
+          <p className="text-neutral-500">1인 선납</p>
+          <p className="font-bold">{formatPlainAmount(currentPoolSummary.contributionPerPlayer)}</p>
+        </div>
+        <div className="rounded-xl bg-neutral-50 p-3">
+          <p className="text-neutral-500">현재 지급</p>
+          <p className="font-bold">{formatPlainAmount(currentPoolSummary.poolPaid)}</p>
+        </div>
+        <div className="rounded-xl bg-neutral-50 p-3">
+          <p className="text-neutral-500">현재 이월</p>
+          <p className="font-bold">{formatPlainAmount(currentPoolSummary.remainingCarryOver)}</p>
+        </div>
+        {currentPoolSummary.firstPrizeCarryOver !== undefined && (
+          <div className="rounded-xl bg-neutral-50 p-3">
+            <p className="text-neutral-500">1등 상금 이월</p>
+            <p className="font-bold">{formatPlainAmount(currentPoolSummary.firstPrizeCarryOver)}</p>
+          </div>
+        )}
+        {currentPoolSummary.secondPrizeCarryOver !== undefined && (
+          <div className="rounded-xl bg-neutral-50 p-3">
+            <p className="text-neutral-500">2등 상금 이월</p>
+            <p className="font-bold">{formatPlainAmount(currentPoolSummary.secondPrizeCarryOver)}</p>
+          </div>
+        )}
+        {currentPoolSummary.schoolLabel && (
+          <div className="col-span-2 rounded-xl bg-amber-50 p-3">
+            <p className="text-neutral-500">현재 학교</p>
+            <p className="font-bold">{currentPoolSummary.schoolLabel}</p>
+          </div>
+        )}
+      </div>
+    </section>
+  ) : null;
+
+  const nearSettlementSection = nearSettlementSummary.totalAmount > 0 ? (
+      <section className="rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold">니어 정산</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          니어 상금은 총획득 상금에 함께 반영됩니다.
+        </p>
+        <div className="mt-3 space-y-2">
+          {nearSettlementSummary.players
+            .filter((summary) => summary.totalAmount > 0)
+            .map((summary) => (
+              <div key={summary.playerId} className="rounded-xl bg-lime-50 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">
+                    {getPlayerName(players, summary.playerId)}
+                  </span>
+                  <span className="font-bold text-lime-700">
+                    {formatAmount(summary.totalAmount)}
+                  </span>
+                </div>
+
+                {summary.breakdowns.length > 0 && (
+                  <p className="mt-1 text-xs text-lime-800">
+                    {summary.breakdowns.join(" · ")}
+                  </p>
+                )}
+              </div>
+            ))}
+        </div>
+      </section>
+    ) : null;
+
+  const oecdSettlementSection =
+    settings.oecd.enabled &&
+    (oecdSettlementSummary.totalPenaltyAmount > 0 ||
+      oecdSettlementSummary.commonPotAmount > 0 ||
+      oecdSettlementSummary.winnerPaidAmount > 0) ? (
+      <section className="rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold">OECD 정산</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          수동 입력한 OECD 벌금이 총획득 상금에 반영됩니다.
+        </p>
+        <div className="mt-3 space-y-2">
+          {oecdSettlementSummary.players
+            .filter((summary) => summary.totalAmount !== 0)
+            .map((summary) => (
+              <div key={summary.playerId} className="rounded-xl bg-rose-50 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{getPlayerName(players, summary.playerId)}</span>
+                  <span className="font-bold text-rose-700">{formatAmount(summary.totalAmount)}</span>
+                </div>
+                {summary.breakdowns.length > 0 && (
+                  <p className="mt-1 text-xs text-rose-800">{summary.breakdowns.join(" · ")}</p>
+                )}
+              </div>
+            ))}
+        </div>
+        {oecdSettlementSummary.commonPotAmount > 0 && (
+          <p className="mt-3 text-sm font-semibold text-rose-800">
+            공통 pot 적립: {formatPlainAmount(oecdSettlementSummary.commonPotAmount)}
+          </p>
+        )}
+      </section>
+    ) : null;
+
+  const strokeSettlementSection =
+    activeCalculation.strokeBet && activeCalculation.strokeBet.pairwiseSettlements.length > 0 ? (
+      <section className="rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold">스트로크 정산 상세</h2>
+        <div className="mt-3 space-y-2">
+          {activeCalculation.strokeBet.pairwiseSettlements.map((item, index) => (
+            <div key={index} className="rounded-xl bg-neutral-50 p-3 text-sm">
+              <span className="font-medium">{getPlayerName(players, item.fromPlayerId)}</span>
+              <span> → </span>
+              <span className="font-medium">{getPlayerName(players, item.toPlayerId)}</span>
+              <span className="font-bold"> {formatPlainAmount(item.amount)}</span>
+              <p className="mt-1 text-xs text-neutral-500">{item.reason}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    ) : null;
 
   const returnToPlayButton = (
     <button
@@ -3219,246 +3049,111 @@ function renderModeButton(mode: BettingMode) {
         >
           전체 스코어카드 보기
         </button>
-        {showPrizePool && (
-          <button
-            type="button"
-            className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
-            onClick={() => setRoundView("pool")}
-          >
-            상금 풀 보기
-          </button>
-        )}
         <button
           type="button"
-          className="w-full rounded-xl bg-red-50 px-4 py-3 text-left text-sm font-semibold text-red-700"
-          onClick={resetRound}
+          className="w-full rounded-xl bg-neutral-100 px-4 py-3 text-left text-sm font-semibold"
+          onClick={() => setRoundView("pool")}
         >
-          새 라운드로 초기화
+          상금 풀 보기
         </button>
       </div>
     </section>
   );
 
-  const nearSettlementSection =
-    nearSettlementSummary.players.some((summary) => summary.totalAmount !== 0) ? (
-      <section className="rounded-2xl bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-bold">니어 정산</h2>
-        <p className="mt-1 text-sm text-neutral-500">
-          파3 니어 결과가 반영된 별도 정산입니다.
-        </p>
-
-        <div className="mt-3 space-y-2">
-          {nearSettlementSummary.players
-            .filter((summary) => summary.totalAmount !== 0)
-            .map((summary) => (
-              <div key={summary.playerId} className="rounded-xl bg-lime-50 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">
-                    {getPlayerName(players, summary.playerId)}
-                  </span>
-                  <span className="font-bold text-lime-700">
-                    {formatAmount(summary.totalAmount)}
-                  </span>
-                </div>
-
-                {summary.breakdowns.length > 0 && (
-                  <p className="mt-1 text-xs text-lime-800">
-                    {summary.breakdowns.join(" · ")}
-                  </p>
-                )}
-              </div>
-            ))}
-        </div>
-      </section>
-    ) : null;
-
-  const oecdSettlementSection =
-    settings.oecd.enabled &&
-    (oecdSettlementSummary.totalPenaltyAmount > 0 ||
-      oecdSettlementSummary.commonPotAmount > 0 ||
-      oecdSettlementSummary.winnerPaidAmount > 0) ? (
-      <section className="rounded-2xl bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-bold">OECD 정산</h2>
-        <p className="mt-1 text-sm text-neutral-500">
-          수동 입력한 OECD 벌금이 총획득 상금에 반영됩니다.
-        </p>
-        <div className="mt-3 space-y-2">
-          {oecdSettlementSummary.players
-            .filter((summary) => summary.totalAmount !== 0)
-            .map((summary) => (
-              <div key={summary.playerId} className="rounded-xl bg-rose-50 p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{getPlayerName(players, summary.playerId)}</span>
-                  <span className="font-bold text-rose-700">{formatAmount(summary.totalAmount)}</span>
-                </div>
-                {summary.breakdowns.length > 0 && (
-                  <p className="mt-1 text-xs text-rose-800">{summary.breakdowns.join(" · ")}</p>
-                )}
-              </div>
-            ))}
-        </div>
-        {oecdSettlementSummary.commonPotAmount > 0 && (
-          <div className="mt-3 rounded-xl bg-neutral-50 p-3 text-sm">
-            <p className="font-semibold">OECD 공통 pot</p>
-            <p>{formatPlainAmount(oecdSettlementSummary.commonPotAmount)}</p>
-          </div>
-        )}
-      </section>
-    ) : null;
-
-  const strokeSettlementSection =
-    settings.mode === "stroke" && settlementSummary.pairwiseSettlements.length > 0 ? (
-      <section className="rounded-2xl bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-bold">스트로크 지급 내역</h2>
-        <div className="mt-3 space-y-2 text-sm">
-          {settlementSummary.pairwiseSettlements.map((item, index) => (
-            <div key={index} className="rounded-xl bg-neutral-50 p-3">
-              <p>
-                {getPlayerName(players, item.fromPlayerId)} →{" "}
-                {getPlayerName(players, item.toPlayerId)}
-              </p>
-              <p className="font-semibold">{formatPlainAmount(item.amount)}</p>
-              <p className="text-xs text-neutral-500">{item.reason}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-    ) : null;
-
-  const prizePoolSection = showPrizePool ? (
-    <section className="rounded-2xl bg-neutral-900 p-5 text-white shadow-sm">
-      <h2 className="text-lg font-bold">상금 풀</h2>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-        <div className="rounded-xl bg-white/15 p-3">
-          <p className="opacity-80">사전 총액</p>
-          <p className="text-lg font-bold">
-            {formatPlainAmount(
-              (activeCalculation.poolSummary?.totalPool ?? 0) +
-                nearSettlementSummary.totalPool
-            )}
-          </p>
-        </div>
-        <div className="rounded-xl bg-white/15 p-3">
-          <p className="opacity-80">1인 선납</p>
-          <p className="text-lg font-bold">
-            {formatPlainAmount(
-              (activeCalculation.poolSummary?.contributionPerPlayer ?? 0) +
-                nearSettlementSummary.contributionPerPlayer
-            )}
-          </p>
-        </div>
-        <div className="rounded-xl bg-white/15 p-3">
-          <p className="opacity-80">지급 완료</p>
-          <p className="text-lg font-bold">
-            {formatPlainAmount(
-              (activeCalculation.poolSummary?.poolPaid ?? 0) +
-                nearSettlementSummary.paidAmount
-            )}
-          </p>
-        </div>
-        <div className="rounded-xl bg-white/15 p-3">
-          <p className="opacity-80">현재 이월</p>
-          <p className="text-lg font-bold">
-            {formatPlainAmount(
-              (activeCalculation.poolSummary?.remainingCarryOver ?? 0) +
-                nearSettlementSummary.remainingPool
-            )}
-          </p>
-        </div>
-      </div>
-      {settings.mode === "school" && activeCalculation.poolSummary?.schoolLabel && (
-        <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-          <p className="font-semibold">
-            학교 상태: {activeCalculation.poolSummary.schoolLabel}
-          </p>
-          <p>
-            1등 상금 이월:{" "}
-            {formatPlainAmount(activeCalculation.poolSummary.firstPrizeCarryOver ?? 0)}
-          </p>
-          <p>
-            2등 상금 이월:{" "}
-            {formatPlainAmount(activeCalculation.poolSummary.secondPrizeCarryOver ?? 0)}
-          </p>
-        </div>
-      )}
-      {oecdSettlementSummary.commonPotAmount > 0 && (
-        <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-          <p className="font-semibold">OECD 공통 pot</p>
-          <p>OECD 누적 벌금: {formatPlainAmount(oecdSettlementSummary.commonPotAmount)}</p>
-        </div>
-      )}
-      {nearSettlementSummary.totalPool > 0 && (
-        <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-          <p className="font-semibold">니어 사전 모금</p>
-          <p>니어 총액: {formatPlainAmount(nearSettlementSummary.totalPool)}</p>
-          <p>
-            1인 추가 선납:{" "}
-            {formatPlainAmount(nearSettlementSummary.contributionPerPlayer)}
-          </p>
-          <p>니어 지급 완료: {formatPlainAmount(nearSettlementSummary.paidAmount)}</p>
-          <p>니어 남은 팟: {formatPlainAmount(nearSettlementSummary.remainingPool)}</p>
-        </div>
-      )}
-    </section>
-  ) : null;
+  const roundViewTitle: Record<RoundView, string> = {
+    play: "라운드 진행",
+    "latest-result": "방금 홀 결과",
+    settlement: "현재 상금",
+    scorecard: "전체 스코어카드",
+    pool: "상금 풀",
+    "final-share": "최종 정산",
+  };
 
   return (
     <main className="min-h-screen bg-neutral-100 p-4 text-neutral-900">
       <div className="mx-auto max-w-md space-y-4">
-        {showRoundHeader && (
-          <header className="rounded-2xl bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm text-neutral-500">{courseName || "라운드팟"}</p>
-                <h1 className="text-2xl font-bold">{roundViewTitle[roundView]}</h1>
-                <p className="mt-3 text-xs text-neutral-400">
-                  자동 저장: {formatSavedTime(lastSavedAt)}
-                </p>
-              </div>
-              <button
-                className="rounded-xl bg-neutral-100 px-3 py-2 text-sm font-semibold"
-                onClick={resetRound}
-              >
-                새 라운드
-              </button>
+        <header className="rounded-2xl bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-neutral-500">{courseName}</p>
+              <h1 className="text-2xl font-bold">{roundViewTitle[roundView]}</h1>
+              <p className="mt-1 text-sm text-neutral-500">
+                {currentHole.holeNumber} / {holeCount}홀 · {getModeLabel(settings.mode)}
+              </p>
             </div>
-          </header>
-        )}
+            <button
+              className="rounded-xl bg-red-50 px-3 py-2 text-sm font-bold text-red-700"
+              onClick={resetRound}
+            >
+              초기화
+            </button>
+          </div>
+        </header>
 
         {roundView === "play" && (
           <>
-{vegasDrawAnimation && (
-  <section className="rounded-2xl bg-white p-5 shadow-sm">
-    <div className="flex items-center justify-between gap-3">
-      <div>
-        <p className="text-sm text-neutral-500">
-          {vegasDrawAnimation.holeNumber}번 홀 라스베가스
-        </p>
-        <h2 className="text-lg font-bold">{vegasDrawAnimation.message}</h2>
-      </div>
-      <div className={`text-4xl ${vegasDrawAnimation.isRunning ? "animate-bounce" : ""}`}>
-        {vegasDrawAnimation.isRunning ? "🎰" : "🏆"}
-      </div>
-    </div>
+            {prizePoolSection}
 
-    {vegasDrawAnimation.isRunning ? (
-      <div className="mt-4 rounded-2xl bg-blue-50 p-5 text-center">
-        <p className="animate-pulse text-lg font-bold text-blue-700">
-          카드를 섞고 있습니다...
-        </p>
-      </div>
-    ) : (
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <div className="rounded-2xl bg-blue-50 p-4">
-          <p className="text-sm font-semibold text-blue-700">A팀</p>
-          <p className="mt-2 font-bold text-blue-950">
-            {formatTeam(players, vegasDrawAnimation.teamAPlayerIds)}
+{settings.mode === "vegas" &&
+  settings.vegas.teamMode === "randomAfterHole" &&
+  currentHole.holeNumber > 1 &&
+  !vegasTeamAssignments.some(
+    (assignment) => assignment.holeId === currentHole.id
+  ) && (
+  <section className="rounded-2xl bg-amber-50 p-5 shadow-sm">
+    <h2 className="text-lg font-bold text-amber-950">라스베가스 랜덤 팀 드로우</h2>
+    <p className="mt-1 text-sm text-amber-800">
+      이전 홀 결과 확인 후 이번 홀 라스베가스 팀을 랜덤으로 정합니다.
+    </p>
+
+    <button
+      type="button"
+      className="mt-4 w-full rounded-2xl bg-amber-600 px-5 py-4 text-base font-bold text-white shadow-sm"
+      onClick={() => {
+        const assignment = createVegasTeamAssignment({
+          hole: currentHole,
+          players,
+          holes,
+          scores,
+          settings: { ...settings.vegas, enabled: true },
+          teamAssignments: vegasTeamAssignments,
+        });
+
+        setVegasDrawAnimation({
+          teamAPlayerIds: [],
+          teamBPlayerIds: [],
+        });
+
+        window.setTimeout(() => {
+          setVegasDrawAnimation({
+            teamAPlayerIds: assignment.teams[0].playerIds,
+            teamBPlayerIds: assignment.teams[1].playerIds,
+          });
+          setVegasTeamAssignments((prev) =>
+            upsertVegasTeamAssignment(prev, assignment)
+          );
+        }, 700);
+      }}
+    >
+      랜덤으로 팀 정하기
+    </button>
+
+    {vegasDrawAnimation && (
+      <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+        <div className="rounded-xl bg-white p-3">
+          <p className="font-semibold text-amber-800">A팀</p>
+          <p className="mt-2 font-bold text-amber-950">
+            {vegasDrawAnimation.teamAPlayerIds.length > 0
+              ? formatTeam(players, vegasDrawAnimation.teamAPlayerIds)
+              : "섞는 중..."}
           </p>
         </div>
-        <div className="rounded-2xl bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-700">B팀</p>
+        <div className="rounded-xl bg-white p-3">
+          <p className="font-semibold text-amber-800">B팀</p>
           <p className="mt-2 font-bold text-amber-950">
-            {formatTeam(players, vegasDrawAnimation.teamBPlayerIds)}
+            {vegasDrawAnimation.teamBPlayerIds.length > 0
+              ? formatTeam(players, vegasDrawAnimation.teamBPlayerIds)
+              : "섞는 중..."}
           </p>
         </div>
       </div>
@@ -3714,6 +3409,17 @@ function renderModeButton(mode: BettingMode) {
           })()}
 
         </section>
+
+        <OecdPenaltyInputSection
+          enabled={settings.oecd.enabled}
+          hole={currentHole}
+          players={players}
+          statuses={currentOecdStatuses}
+          penalties={oecdPenalties}
+          penaltyUnitAmount={currentGamePreviewForDisplay?.baseAmount ?? 1000}
+          formatPlainAmount={formatPlainAmount}
+          onChangePenalty={updateOecdPenalty}
+        />
 
         <button
           type="button"
