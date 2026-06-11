@@ -2627,15 +2627,6 @@ function renderModeButton(mode: BettingMode) {
             </section>
           )}
 
-          <OecdPenaltyInputSection
-            enabled={settings.oecd.enabled}
-            hole={currentHole}
-            players={players}
-            statuses={currentOecdStatuses}
-            penalties={oecdPenalties}
-            formatPlainAmount={formatPlainAmount}
-            onChangePenalty={updateOecdPenalty}
-          />
 
           {settings.mode === "vegas" && (
             <section className="rounded-2xl bg-white p-5 shadow-sm">
@@ -3714,6 +3705,17 @@ function renderModeButton(mode: BettingMode) {
           })()}
 
         </section>
+
+        <OecdPenaltyInputSection
+          enabled={settings.oecd.enabled}
+          hole={currentHole}
+          players={players}
+          statuses={currentOecdStatuses}
+          penalties={oecdPenalties}
+          penaltyUnitAmount={currentGamePreviewForDisplay?.baseAmount ?? 1000}
+          formatPlainAmount={formatPlainAmount}
+          onChangePenalty={updateOecdPenalty}
+        />
 
         <button
           type="button"
