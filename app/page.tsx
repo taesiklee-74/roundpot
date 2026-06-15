@@ -19,6 +19,7 @@ import LatestResultSection from "./components/LatestResultSection";
 import NearWinnerSelector from "./components/NearWinnerSelector";
 import OecdPenaltyInputSection from "./components/OecdPenaltyInputSection";
 import OecdSettingsCard from "./components/OecdSettingsCard";
+import LatePrizeBoostPrompt from "./components/LatePrizeBoostPrompt";
 import CourseLibraryCard from "./components/CourseLibraryCard";
 import RoundShareCard from "./components/RoundShareCard";
 import { buildRoundSummaryText } from "../src/lib/share/roundSummary";
@@ -100,6 +101,18 @@ import {
   getOecdStatusLabel,
   upsertOecdPenalty,
 } from "../src/lib/betting/oecd";
+import {
+  acceptLatePrizeBoostOffer,
+  calculateLatePrizeBoostSettlementSummary,
+  calculateRemainingNearBaseAmount,
+  createDefaultLatePrizeBoostDecision,
+  createLatePrizeBoostOffer,
+  declineLatePrizeBoostOffer,
+  getBaseMainPrizeAmount,
+  normalizeLatePrizeBoostDecision,
+  type LatePrizeBoostDecision,
+  type LatePrizeBoostOffer,
+} from "../src/lib/betting/latePrizeBoost";
 import ExportRoundScoreButton from "./components/ExportRoundScoreButton";
 import MedalPrizeSummaryCard from "./components/MedalPrizeSummaryCard";
 import FinalScorecardExportCard from "./components/FinalScorecardExportCard";
@@ -145,6 +158,7 @@ type SavedRoundState = {
   nearAmount: number;
   nearResults: NearResult[];
   oecdPenalties: HoleOecdPenalty[];
+  latePrizeBoostDecision: LatePrizeBoostDecision;
   savedAt: string;
 };
 
@@ -928,6 +942,7 @@ function getCumulativePrizeTotalsBeforeHole(params: {
   nearAmount: number;
   nearResults: NearResult[];
   oecdPenalties: HoleOecdPenalty[];
+  latePrizeBoostDecision?: LatePrizeBoostDecision;
   targetHoleNumber: number;
 }): Record<string, number> {
   const scoresBeforeHole = getScoresBeforeHole({
@@ -973,14 +988,30 @@ function getCumulativePrizeTotalsBeforeHole(params: {
     gameResult: calculationBeforeHole?.gameResult ?? null,
   });
 
+  const latePrizeBoostBeforeHole = calculateLatePrizeBoostSettlementSummary({
+    players: params.players,
+    decision: {
+      acceptedAtHoleNumber:
+        params.latePrizeBoostDecision?.acceptedAtHoleNumber ?? null,
+      declinedHoleNumbers:
+        params.latePrizeBoostDecision?.declinedHoleNumbers ?? [],
+      allocations: (params.latePrizeBoostDecision?.allocations ?? []).filter(
+        (allocation) => allocation.holeNumber < params.targetHoleNumber
+      ),
+    },
+    gameResult: calculationBeforeHole?.gameResult ?? null,
+  });
+
   return params.players.reduce<Record<string, number>>((acc, player) => {
     const gameTotal =
       gameTotals?.players.find((summary) => summary.playerId === player.id)
         ?.totalPrizeAmount ?? 0;
     const nearTotal = nearBeforeHole.byPlayerId[player.id]?.totalAmount ?? 0;
     const oecdTotal = oecdBeforeHole.byPlayerId[player.id] ?? 0;
+    const latePrizeBoostTotal =
+      latePrizeBoostBeforeHole.byPlayerId[player.id] ?? 0;
 
-    acc[player.id] = gameTotal + nearTotal + oecdTotal;
+    acc[player.id] = gameTotal + nearTotal + oecdTotal + latePrizeBoostTotal;
     return acc;
   }, {});
 }
@@ -996,6 +1027,7 @@ function getCumulativePrizeTotalsByHoleNumber(params: {
   nearAmount: number;
   nearResults: NearResult[];
   oecdPenalties: HoleOecdPenalty[];
+  latePrizeBoostDecision?: LatePrizeBoostDecision;
 }): Record<number, Record<string, number>> {
   const result: Record<number, Record<string, number>> = {};
 
@@ -1100,6 +1132,10 @@ export default function Home() {
   const [nearAmount, setNearAmount] = useState(5000);
   const [nearResults, setNearResults] = useState<NearResult[]>([]);
   const [oecdPenalties, setOecdPenalties] = useState<HoleOecdPenalty[]>([]);
+  const [latePrizeBoostDecision, setLatePrizeBoostDecision] =
+    useState<LatePrizeBoostDecision>(() => createDefaultLatePrizeBoostDecision());
+  const [pendingLatePrizeBoostOffer, setPendingLatePrizeBoostOffer] =
+    useState<LatePrizeBoostOffer | null>(null);
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>([]);
   const [courseImageExtracting, setCourseImageExtracting] = useState(false);
   const [courseImageExtractError, setCourseImageExtractError] = useState("");
@@ -1208,6 +1244,9 @@ export default function Home() {
       setOecdPenalties(
         Array.isArray(saved.oecdPenalties) ? saved.oecdPenalties : []
       );
+      setLatePrizeBoostDecision(
+        normalizeLatePrizeBoostDecision(saved.latePrizeBoostDecision)
+      );
       setLastSavedAt(typeof saved.savedAt === "string" ? saved.savedAt : null);
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -1241,6 +1280,7 @@ export default function Home() {
       nearAmount,
       nearResults,
       oecdPenalties,
+      latePrizeBoostDecision,
       savedAt,
     };
 
@@ -1268,6 +1308,7 @@ export default function Home() {
     nearAmount,
     nearResults,
     oecdPenalties,
+    latePrizeBoostDecision,
     ]);
 
 
@@ -1338,6 +1379,57 @@ export default function Home() {
     [players, oecdPenalties, settings, activeCalculation]
   );
 
+  const oecdCommonPotForBalance = useMemo(() => {
+    if (!settings.oecd.enabled) {
+      return 0;
+    }
+
+    const effectiveDestination =
+      settings.mode === "skins" ? settings.oecd.penaltyDestination : "commonPot";
+    const holeResultById = new Map(
+      (activeCalculation?.gameResult.holeResults ?? []).map((result) => [
+        result.holeId,
+        result,
+      ])
+    );
+
+    return oecdPenalties.reduce((sum, penalty) => {
+      const amount = Math.max(0, penalty.amount);
+      if (amount <= 0) return sum;
+
+      if (effectiveDestination === "commonPot") {
+        return sum + amount;
+      }
+
+      const holeResult = holeResultById.get(penalty.holeId);
+      if (
+        !holeResult ||
+        holeResult.winnerType === "none" ||
+        holeResult.winnerPlayerIds.length === 0
+      ) {
+        return sum + amount;
+      }
+
+      return sum;
+    }, 0);
+  }, [
+    settings.oecd.enabled,
+    settings.oecd.penaltyDestination,
+    settings.mode,
+    oecdPenalties,
+    activeCalculation,
+  ]);
+
+  const latePrizeBoostSettlementSummary = useMemo(
+    () =>
+      calculateLatePrizeBoostSettlementSummary({
+        players,
+        decision: latePrizeBoostDecision,
+        gameResult: activeCalculation?.gameResult ?? null,
+      }),
+    [players, latePrizeBoostDecision, activeCalculation]
+  );
+
   const roundSummaryText =
     settlementSummary === null
       ? ""
@@ -1349,11 +1441,17 @@ export default function Home() {
             const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
             const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
             const oecdTotalAmount = oecdSettlementSummary.byPlayerId[summary.playerId] ?? 0;
+            const latePrizeBoostTotalAmount =
+              latePrizeBoostSettlementSummary.byPlayerId[summary.playerId] ?? 0;
 
             return {
               playerId: summary.playerId,
               playerName: summary.playerName,
-              totalAmount: summary.totalPrizeAmount + nearTotalAmount + oecdTotalAmount,
+              totalAmount:
+                summary.totalPrizeAmount +
+                nearTotalAmount +
+                oecdTotalAmount +
+                latePrizeBoostTotalAmount,
             };
           }),
           nearPlayers: nearSettlementSummary.players.map((summary) => ({
@@ -1379,6 +1477,7 @@ export default function Home() {
         nearAmount,
         nearResults,
         oecdPenalties,
+        latePrizeBoostDecision,
       }),
     [
       players,
@@ -1407,6 +1506,96 @@ export default function Home() {
       settings: settings.oecd,
     });
   }, [players, holes, currentHole, cumulativeBeforeHoleByNumber, settings.oecd]);
+
+  const latePrizeBoostTargetHole = useMemo(() => {
+    if (!currentHole) return null;
+
+    if (roundView === "latest-result") {
+      return (
+        holes.find((hole) => hole.holeNumber === currentHole.holeNumber + 1) ??
+        null
+      );
+    }
+
+    return currentHole;
+  }, [currentHole, holes, roundView]);
+
+  const latePrizeBoostOffer = useMemo(() => {
+    if (!latePrizeBoostTargetHole || !activeCalculation?.poolSummary) {
+      return null;
+    }
+
+    const remainingMainBaseAmount =
+      getBaseMainPrizeAmount(settings) *
+      holes.filter((hole) => hole.holeNumber >= latePrizeBoostTargetHole.holeNumber).length;
+    const remainingNearBaseAmount = calculateRemainingNearBaseAmount({
+      holes,
+      currentHoleNumber: latePrizeBoostTargetHole.holeNumber,
+      nearEnabled,
+      nearAmount,
+    });
+    const latePrizeBoostPaidAmount = Math.max(
+      0,
+      latePrizeBoostSettlementSummary.totalExtraPrizeAmount -
+        latePrizeBoostSettlementSummary.unpaidExtraPrizeAmount
+    );
+    const currentTotalPrizeAmount =
+      activeCalculation.poolSummary.totalPool + nearSettlementSummary.totalPool;
+    const currentPaidPrizeAmount =
+      activeCalculation.poolSummary.poolPaid +
+      nearSettlementSummary.paidAmount +
+      latePrizeBoostPaidAmount;
+    const currentTotalBalance = Math.max(
+      0,
+      currentTotalPrizeAmount + oecdCommonPotForBalance - currentPaidPrizeAmount
+    );
+
+    return createLatePrizeBoostOffer({
+      holes,
+      currentHole: latePrizeBoostTargetHole,
+      settings,
+      decision: latePrizeBoostDecision,
+      currentTotalBalance,
+      remainingExpectedPayout: remainingMainBaseAmount + remainingNearBaseAmount,
+    });
+  }, [
+    latePrizeBoostTargetHole,
+    activeCalculation,
+    settings,
+    holes,
+    nearEnabled,
+    nearAmount,
+    nearSettlementSummary.totalPool,
+    nearSettlementSummary.paidAmount,
+    oecdCommonPotForBalance,
+    latePrizeBoostDecision,
+    latePrizeBoostSettlementSummary.totalExtraPrizeAmount,
+    latePrizeBoostSettlementSummary.unpaidExtraPrizeAmount,
+  ]);
+
+  useEffect(() => {
+    if (
+      !hasStarted ||
+      roundView !== "play" ||
+      oecdCommonPotForBalance > 0 ||
+      !latePrizeBoostOffer?.shouldOffer
+    ) {
+      setPendingLatePrizeBoostOffer(null);
+      return;
+    }
+
+    setPendingLatePrizeBoostOffer((prev) => {
+      if (
+        prev?.holeNumber === latePrizeBoostOffer.holeNumber &&
+        prev.excessAmount === latePrizeBoostOffer.excessAmount &&
+        prev.remainingExpectedPayout === latePrizeBoostOffer.remainingExpectedPayout
+      ) {
+        return prev;
+      }
+
+      return latePrizeBoostOffer;
+    });
+  }, [hasStarted, roundView, oecdCommonPotForBalance, latePrizeBoostOffer]);
 
   function updatePlayerName(index: number, value: string) {
     setPlayerNames((prev) =>
@@ -1844,6 +2033,8 @@ export default function Home() {
     setManualFirstHusseinPlayerId("");
     setNearResults([]);
     setOecdPenalties([]);
+    setLatePrizeBoostDecision(createDefaultLatePrizeBoostDecision());
+    setPendingLatePrizeBoostOffer(null);
     setVegasDrawAnimation(null);
     setCurrentHoleIndex(0);
     setRoundView("play");
@@ -1855,6 +2046,7 @@ export default function Home() {
     if (!confirmed) return;
 
     window.localStorage.removeItem(STORAGE_KEY);
+    setPendingLatePrizeBoostOffer(null);
     setHasStarted(false);
     setCourseName("테스트 CC");
     setHoleCount(9);
@@ -2359,6 +2551,30 @@ function saveCurrentHoleAndShowResult() {
   finishSave();
 }
 
+function acceptLatePrizeBoost() {
+  const offer = pendingLatePrizeBoostOffer ?? latePrizeBoostOffer;
+  if (oecdCommonPotForBalance > 0) return;
+  if (!offer?.shouldOffer) return;
+
+  setLatePrizeBoostDecision((prev) =>
+    acceptLatePrizeBoostOffer({
+      decision: prev,
+      offer,
+    })
+  );
+  setPendingLatePrizeBoostOffer(null);
+}
+
+function declineLatePrizeBoost() {
+  const offer = pendingLatePrizeBoostOffer ?? latePrizeBoostOffer;
+  if (!offer) return;
+
+  setLatePrizeBoostDecision((prev) =>
+    declineLatePrizeBoostOffer(prev, offer.holeNumber)
+  );
+  setPendingLatePrizeBoostOffer(null);
+}
+
 function returnToPlay() {
   const firstIncompleteHoleIndex = getFirstIncompleteHoleIndex(
     players,
@@ -2368,9 +2584,11 @@ function returnToPlay() {
 
   if (firstIncompleteHoleIndex !== null) {
     setCurrentHoleIndex(firstIncompleteHoleIndex);
+    setRoundView("play");
+    return;
   }
 
-  setRoundView("play");
+  setRoundView("latest-result");
 }
 
 function goToNextHoleFromResult() {
@@ -2497,16 +2715,43 @@ function renderModeButton(mode: BettingMode) {
   if (!hasStarted) {
     const selectedPlayerCount = Math.max(1, playerNames.filter((name) => name.trim()).length);
     const oecdEntryFeePerPlayer = (() => {
-      if (settings.mode === "skins") return (settings.skins.amountPerHole * holeCount) / selectedPlayerCount;
-      if (settings.mode === "vegas") return (settings.vegas.amountPerHole * holeCount) / selectedPlayerCount;
-      if (settings.mode === "hussein") return (settings.hussein.amountPerHole * holeCount) / selectedPlayerCount;
+      const nearHoleCountForEntryFee = 4;
+      const nearEntryFeePerPlayer =
+        nearEnabled && nearAmount > 0
+          ? (nearAmount * nearHoleCountForEntryFee) / selectedPlayerCount
+          : 0;
+
+      if (settings.mode === "skins") {
+        return (settings.skins.amountPerHole * holeCount) / selectedPlayerCount + nearEntryFeePerPlayer;
+      }
+
+      if (settings.mode === "vegas") {
+        return (settings.vegas.amountPerHole * holeCount) / selectedPlayerCount + nearEntryFeePerPlayer;
+      }
+
+      if (settings.mode === "hussein") {
+        return (settings.hussein.amountPerHole * holeCount) / selectedPlayerCount + nearEntryFeePerPlayer;
+      }
+
       if (settings.mode === "school") {
-        return ((settings.school.firstPrizeAmount + settings.school.secondPrizeAmount) * holeCount) / selectedPlayerCount;
+        return (
+          ((settings.school.firstPrizeAmount + settings.school.secondPrizeAmount) * holeCount) /
+            selectedPlayerCount +
+          nearEntryFeePerPlayer
+        );
       }
+
       if (settings.mode === "cycle") {
-        return (settings.cycle.skinsAmount + settings.cycle.husseinAmount + settings.cycle.vegasAmount) / selectedPlayerCount;
+        return (
+          (settings.cycle.skinsAmount +
+            settings.cycle.husseinAmount +
+            settings.cycle.vegasAmount) /
+            selectedPlayerCount +
+          nearEntryFeePerPlayer
+        );
       }
-      return 0;
+
+      return nearEntryFeePerPlayer;
     })();
 
     return (
@@ -3382,7 +3627,8 @@ function renderModeButton(mode: BettingMode) {
   const showPrizePool =
     Boolean(activeCalculation.poolSummary) ||
     nearSettlementSummary.totalPool > 0 ||
-    oecdSettlementSummary.commonPotAmount > 0;
+    oecdCommonPotForBalance > 0 ||
+    latePrizeBoostSettlementSummary.totalExtraPrizeAmount > 0;
   const showRoundHeader =
     roundView !== "play" && roundView !== "latest-result";
 
@@ -3419,8 +3665,13 @@ function renderModeButton(mode: BettingMode) {
     const nearSettlement = nearSettlementSummary.byPlayerId[summary.playerId];
     const nearTotalAmount = nearSettlement?.totalAmount ?? 0;
     const oecdTotalAmount = oecdSettlementSummary.byPlayerId[summary.playerId] ?? 0;
+    const latePrizeBoostTotalAmount =
+      latePrizeBoostSettlementSummary.byPlayerId[summary.playerId] ?? 0;
     const totalAmountWithNear =
-      summary.totalPrizeAmount + nearTotalAmount + oecdTotalAmount;
+      summary.totalPrizeAmount +
+      nearTotalAmount +
+      oecdTotalAmount +
+      latePrizeBoostTotalAmount;
 
     return {
       playerId: summary.playerId,
@@ -3476,6 +3727,40 @@ function renderModeButton(mode: BettingMode) {
       </div>
     </section>
   );
+
+  const latePrizeBoostSettlementSection =
+    latePrizeBoostSettlementSummary.totalExtraPrizeAmount > 0 ? (
+      <section className="rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold">종반전 추가 상금</h2>
+        <p className="mt-1 text-sm text-neutral-500">
+          16~18번 홀 시작 전 선택한 메인 게임 추가 상금입니다.
+        </p>
+        <div className="mt-3 space-y-2">
+          {latePrizeBoostSettlementSummary.players
+            .filter((summary) => summary.totalAmount !== 0)
+            .map((summary) => (
+              <div key={summary.playerId} className="rounded-xl bg-blue-50 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{getPlayerName(players, summary.playerId)}</span>
+                  <span className="font-bold text-blue-700">
+                    {formatAmount(summary.totalAmount)}
+                  </span>
+                </div>
+                {summary.breakdowns.length > 0 && (
+                  <p className="mt-1 text-xs text-blue-800">
+                    {summary.breakdowns.join(" · ")}
+                  </p>
+                )}
+              </div>
+            ))}
+        </div>
+        {latePrizeBoostSettlementSummary.unpaidExtraPrizeAmount > 0 && (
+          <p className="mt-3 rounded-xl bg-neutral-50 p-3 text-sm text-neutral-600">
+            아직 지급되지 않은 종반전 추가 상금: {formatPlainAmount(latePrizeBoostSettlementSummary.unpaidExtraPrizeAmount)}
+          </p>
+        )}
+      </section>
+    ) : null;
 
   const nearSettlementSection =
     nearSettlementSummary.players.some((summary) => summary.totalAmount !== 0) ? (
@@ -3563,78 +3848,60 @@ function renderModeButton(mode: BettingMode) {
       </section>
     ) : null;
 
+  const poolMainTotalPrizeAmount = activeCalculation.poolSummary?.totalPool ?? 0;
+  const poolNearTotalPrizeAmount = nearSettlementSummary.totalPool;
+  const poolTotalPrizeAmount = poolMainTotalPrizeAmount + poolNearTotalPrizeAmount;
+  const poolLatePrizeBoostPaidAmount = Math.max(
+    0,
+    latePrizeBoostSettlementSummary.totalExtraPrizeAmount -
+      latePrizeBoostSettlementSummary.unpaidExtraPrizeAmount
+  );
+  const poolMainPaidPrizeAmount =
+    (activeCalculation.poolSummary?.poolPaid ?? 0) + poolLatePrizeBoostPaidAmount;
+  const poolNearPaidPrizeAmount = nearSettlementSummary.paidAmount;
+  const poolPaidPrizeAmount = poolMainPaidPrizeAmount + poolNearPaidPrizeAmount;
+  const poolRemainingPrizeAmount = Math.max(
+    0,
+    poolTotalPrizeAmount + oecdCommonPotForBalance - poolPaidPrizeAmount
+  );
+
   const prizePoolSection = showPrizePool ? (
     <section className="rounded-2xl bg-neutral-900 p-5 text-white shadow-sm">
       <h2 className="text-lg font-bold">상금 풀</h2>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+      <div className="mt-3 grid grid-cols-1 gap-2 text-sm">
         <div className="rounded-xl bg-white/15 p-3">
-          <p className="opacity-80">사전 총액</p>
-          <p className="text-lg font-bold">
-            {formatPlainAmount(
-              (activeCalculation.poolSummary?.totalPool ?? 0) +
-                nearSettlementSummary.totalPool
-            )}
+          <p className="opacity-80">총상금</p>
+          <p className="text-lg font-bold">{formatPlainAmount(poolTotalPrizeAmount)}</p>
+          <p className="mt-1 text-xs opacity-75">
+            홀상금 {formatPlainAmount(poolMainTotalPrizeAmount)} + 니어상금 {formatPlainAmount(poolNearTotalPrizeAmount)}
           </p>
         </div>
         <div className="rounded-xl bg-white/15 p-3">
-          <p className="opacity-80">1인 선납</p>
-          <p className="text-lg font-bold">
-            {formatPlainAmount(
-              (activeCalculation.poolSummary?.contributionPerPlayer ?? 0) +
-                nearSettlementSummary.contributionPerPlayer
-            )}
+          <p className="opacity-80">지급 상금</p>
+          <p className="text-lg font-bold">{formatPlainAmount(poolPaidPrizeAmount)}</p>
+          <p className="mt-1 text-xs opacity-75">
+            홀상금 {formatPlainAmount(poolMainPaidPrizeAmount)} + 니어상금 {formatPlainAmount(poolNearPaidPrizeAmount)}
           </p>
         </div>
         <div className="rounded-xl bg-white/15 p-3">
-          <p className="opacity-80">지급 완료</p>
-          <p className="text-lg font-bold">
-            {formatPlainAmount(
-              (activeCalculation.poolSummary?.poolPaid ?? 0) +
-                nearSettlementSummary.paidAmount
-            )}
-          </p>
-        </div>
-        <div className="rounded-xl bg-white/15 p-3">
-          <p className="opacity-80">현재 이월</p>
-          <p className="text-lg font-bold">
-            {formatPlainAmount(
-              (activeCalculation.poolSummary?.remainingCarryOver ?? 0) +
-                nearSettlementSummary.remainingPool
-            )}
+          <p className="opacity-80">잔여상금</p>
+          <p className="text-lg font-bold">{formatPlainAmount(poolRemainingPrizeAmount)}</p>
+          <p className="mt-1 text-xs opacity-75">
+            총상금 + OECD 공통pot - 지급상금
           </p>
         </div>
       </div>
-      {settings.mode === "school" && activeCalculation.poolSummary?.schoolLabel && (
-        <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-          <p className="font-semibold">
-            학교 상태: {activeCalculation.poolSummary.schoolLabel}
-          </p>
-          <p>
-            1등 상금 이월:{" "}
-            {formatPlainAmount(activeCalculation.poolSummary.firstPrizeCarryOver ?? 0)}
-          </p>
-          <p>
-            2등 상금 이월:{" "}
-            {formatPlainAmount(activeCalculation.poolSummary.secondPrizeCarryOver ?? 0)}
-          </p>
-        </div>
-      )}
-      {oecdSettlementSummary.commonPotAmount > 0 && (
+      {oecdCommonPotForBalance > 0 && (
         <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
           <p className="font-semibold">OECD 공통 pot</p>
-          <p>OECD 누적 벌금: {formatPlainAmount(oecdSettlementSummary.commonPotAmount)}</p>
+          <p>{formatPlainAmount(oecdCommonPotForBalance)}</p>
         </div>
       )}
-      {nearSettlementSummary.totalPool > 0 && (
+      {latePrizeBoostSettlementSummary.totalExtraPrizeAmount > 0 && (
         <div className="mt-3 rounded-xl bg-white/15 p-3 text-sm">
-          <p className="font-semibold">니어 사전 모금</p>
-          <p>니어 총액: {formatPlainAmount(nearSettlementSummary.totalPool)}</p>
-          <p>
-            1인 추가 선납:{" "}
-            {formatPlainAmount(nearSettlementSummary.contributionPerPlayer)}
-          </p>
-          <p>니어 지급 완료: {formatPlainAmount(nearSettlementSummary.paidAmount)}</p>
-          <p>니어 남은 팟: {formatPlainAmount(nearSettlementSummary.remainingPool)}</p>
+          <p className="font-semibold">종반전 추가 상금</p>
+          <p>배정 총액: {formatPlainAmount(latePrizeBoostSettlementSummary.totalExtraPrizeAmount)}</p>
+          <p>미지급 추가 상금: {formatPlainAmount(latePrizeBoostSettlementSummary.unpaidExtraPrizeAmount)}</p>
         </div>
       )}
     </section>
@@ -3643,6 +3910,18 @@ function renderModeButton(mode: BettingMode) {
   return (
     <main className="min-h-screen bg-neutral-100 p-4 text-neutral-900">
       <div className="mx-auto max-w-md space-y-4">
+
+
+        <LatePrizeBoostPrompt
+          offer={
+          hasStarted && roundView === "play" && oecdCommonPotForBalance <= 0
+            ? pendingLatePrizeBoostOffer ?? latePrizeBoostOffer
+            : null
+        }
+          formatPlainAmount={formatPlainAmount}
+          onAccept={acceptLatePrizeBoost}
+          onDecline={declineLatePrizeBoost}
+        />
         {showRoundHeader && (
           <header className="rounded-2xl bg-white p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
@@ -3705,7 +3984,27 @@ function renderModeButton(mode: BettingMode) {
 )}
 
         <CurrentGamePreviewCard
-          preview={currentGamePreviewForDisplay}
+          preview={currentGamePreviewForDisplay && currentHole
+  ? (() => {
+      const allocation = latePrizeBoostDecision.allocations.find(
+        (item) => item.holeId === currentHole.id
+      );
+      if (!allocation || allocation.extraMainPrizeAmount <= 0) {
+        return currentGamePreviewForDisplay;
+      }
+      return {
+        ...currentGamePreviewForDisplay,
+        prizeAmount:
+          currentGamePreviewForDisplay.prizeAmount +
+          allocation.extraMainPrizeAmount,
+        description:
+          currentGamePreviewForDisplay.description +
+          " 종반전 추가상금 " +
+          formatPlainAmount(allocation.extraMainPrizeAmount) +
+          " 포함.",
+      };
+    })()
+  : currentGamePreviewForDisplay}
           players={players}
           formatPlainAmount={formatPlainAmount}
           formatTeam={formatTeam}
@@ -3987,9 +4286,18 @@ function renderModeButton(mode: BettingMode) {
               getPlayerName={getPlayerName}
               handicapAdjustments={latestHandicapAdjustments}
               nearResult={latestNearResult}
+              oecdPenalties={oecdPenalties.filter(
+                (penalty) => penalty.holeId === latestResult?.holeId
+              )}
+              latePrizeBoostExtraAmount={
+                latePrizeBoostDecision.allocations.find(
+                  (allocation) => allocation.holeId === latestResult?.holeId
+                )?.extraMainPrizeAmount ?? 0
+              }
             />
 
             {latestPrizeSection}
+            {latePrizeBoostSettlementSection}
             {oecdSettlementSection}            
 
             {isLastHole ? (

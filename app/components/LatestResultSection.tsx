@@ -4,6 +4,7 @@ import type {
   BettingMode,
   BettingSettingsV2,
   HoleGameResult,
+  HoleOecdPenalty,
   Player,
 } from "../../src/lib/betting/types";
 
@@ -69,6 +70,8 @@ type LatestResultSectionProps = {
   getPlayerName: (players: Player[], playerId: string) => string;
   handicapAdjustments: HandicapScoreAdjustment[];
   nearResult: NearResult | null;
+  oecdPenalties?: HoleOecdPenalty[];
+  latePrizeBoostExtraAmount?: number;
 };
 
 function isSkinsDisplayResult(
@@ -141,35 +144,19 @@ export default function LatestResultSection({
   getPlayerName,
   handicapAdjustments,
   nearResult,
+  oecdPenalties = [],
+  latePrizeBoostExtraAmount = 0,
 }: LatestResultSectionProps) {
   if (!latestResult) {
     return null;
   }
 
   const latestNearWinnerPlayerId = nearResult?.winnerPlayerId ?? null;
+  const latestNearAmount = nearResult?.amount ?? 0;
 
   return (
     <section className="rounded-2xl bg-amber-50 p-5 shadow-sm">
       <h2 className="text-lg font-bold">방금 홀 결과</h2>
-
-      {nearResult && latestNearWinnerPlayerId && (
-        <div className="mt-3 rounded-2xl bg-lime-50 p-4">
-          <p className="text-sm font-bold text-lime-700">니어 위너</p>
-          <div className="mt-1 flex items-center justify-between gap-3">
-            <p className="text-xl font-black text-lime-950">
-              {getPlayerName(players, latestNearWinnerPlayerId)}
-            </p>
-            <p className="text-lg font-black text-lime-700">
-              {formatPlainAmount(nearResult.amount)}
-            </p>
-          </div>
-          <p className="mt-1 text-xs text-lime-800">
-            {nearResult.gameKind === "vegas"
-              ? "라스베가스 팀 니어 기준으로 정산됩니다."
-              : "파3 니어 보너스가 정산에 반영됩니다."}
-          </p>
-        </div>
-      )}
 
       {settings.mode === "school" ? (
         (() => {
@@ -622,6 +609,51 @@ export default function LatestResultSection({
             settings.mode === "cycle"
               ? `${latestResult.holeNumber}번 홀 순환게임 · 스킨스`
               : `${latestResult.holeNumber}번 홀 스킨스`;
+          const winnerPlayerIds = isWin ? latestResult.winnerPlayerIds : [];
+          const mainPrizeAmount = isWin ? latestResult.prizeAmount : 0;
+          const lateBoostAmount = isWin ? Math.max(0, latePrizeBoostExtraAmount) : 0;
+          const nearPrizeAmount =
+            isWin && latestNearWinnerPlayerId && winnerPlayerIds.includes(latestNearWinnerPlayerId)
+              ? latestNearAmount
+              : 0;
+          const oecdPenaltyAmount = isWin
+            ? oecdPenalties
+                .filter((penalty) => winnerPlayerIds.includes(penalty.playerId))
+                .reduce((sum, penalty) => sum + Math.max(0, penalty.amount), 0)
+            : 0;
+          const oecdReceivedAmount =
+            isWin &&
+            settings.mode === "skins" &&
+            settings.oecd.penaltyDestination === "winner" &&
+            winnerPlayerIds.length > 0
+              ? oecdPenalties.reduce((sum, penalty) => sum + Math.max(0, penalty.amount), 0)
+              : 0;
+          const totalReceivedAmount =
+            mainPrizeAmount +
+            lateBoostAmount +
+            nearPrizeAmount +
+            oecdReceivedAmount -
+            oecdPenaltyAmount;
+          const prizeBreakdownRows = [
+            mainPrizeAmount > 0
+              ? { label: "홀상금", amount: mainPrizeAmount, sign: 1 }
+              : null,
+            lateBoostAmount > 0
+              ? { label: "종반전 추가상금", amount: lateBoostAmount, sign: 1 }
+              : null,
+            nearPrizeAmount > 0
+              ? { label: "니어", amount: nearPrizeAmount, sign: 1 }
+              : null,
+            oecdReceivedAmount > 0
+              ? { label: "OECD 벌금 수령", amount: oecdReceivedAmount, sign: 1 }
+              : null,
+            oecdPenaltyAmount > 0
+              ? { label: "OECD 벌금", amount: oecdPenaltyAmount, sign: -1 }
+              : null,
+          ].filter(
+            (row): row is { label: string; amount: number; sign: 1 | -1 } =>
+              row !== null
+          );
 
           return (
             <div className="mt-3 rounded-2xl bg-neutral-50 p-4">
@@ -650,13 +682,27 @@ export default function LatestResultSection({
                 <p
                   className={`text-sm font-semibold ${isWin ? "text-blue-700" : "text-amber-700"}`}
                 >
-                  {isWin ? "수령 상금" : "이월 상금"}
+                  {isWin ? "이번 홀 총 수령" : "이월 상금"}
                 </p>
                 <p
                   className={`mt-1 text-3xl font-black ${isWin ? "text-blue-700" : "text-amber-700"}`}
                 >
-                  {formatPlainAmount(latestResult.prizeAmount)}
+                  {formatPlainAmount(isWin ? totalReceivedAmount : latestResult.prizeAmount)}
                 </p>
+
+                {isWin && prizeBreakdownRows.length > 0 && (
+                  <div className="mt-3 space-y-1 border-t border-blue-100 pt-3 text-sm">
+                    {prizeBreakdownRows.map((row) => (
+                      <div key={row.label} className="flex items-center justify-between">
+                        <span className="text-neutral-600">{row.label}</span>
+                        <span className={row.sign > 0 ? "font-bold text-blue-700" : "font-bold text-rose-700"}>
+                          {row.sign > 0 ? "+" : "-"}
+                          {formatPlainAmount(row.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {!isWin && tiedPlayerIds.length > 0 && (
@@ -727,6 +773,25 @@ export default function LatestResultSection({
         </div>
       )}
     
+      {nearResult && latestNearWinnerPlayerId && (
+        <div className="mt-4 rounded-2xl bg-lime-50 p-4">
+          <p className="text-sm font-bold text-lime-700">니어 위너</p>
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <p className="text-xl font-black text-lime-950">
+              {getPlayerName(players, latestNearWinnerPlayerId)}
+            </p>
+            <p className="text-lg font-black text-lime-700">
+              {formatPlainAmount(nearResult.amount)}
+            </p>
+          </div>
+          <p className="mt-1 text-xs text-lime-800">
+            {nearResult.gameKind === "vegas"
+              ? "라스베가스 팀 니어 기준으로 정산됩니다."
+              : "파3 니어 보너스가 정산에 반영됩니다."}
+          </p>
+        </div>
+      )}
+
       {handicapAdjustments.length > 0 && (
         <div className="mt-4 rounded-2xl bg-amber-50 p-4">
           <h3 className="text-sm font-bold text-amber-900">핸디 적용 내역</h3>
