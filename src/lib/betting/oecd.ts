@@ -48,6 +48,26 @@ export function getThresholdBasedOecdStage(
   return 0;
 }
 
+function shouldResetMaintainedStage(params: {
+  cumulativeBeforeHole: number;
+  settings: OecdSettings;
+}): boolean {
+  const { cumulativeBeforeHole, settings } = params;
+
+  if (cumulativeBeforeHole <= 0) {
+    return true;
+  }
+
+  if (
+    settings.exitRule === "belowEntryAmount" &&
+    getThresholdBasedOecdStage(cumulativeBeforeHole, settings) === 0
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function getMaintainedOecdStageBeforeOrAtCurrentHole(params: {
   playerId: ID;
   currentHoleNumber: number;
@@ -75,6 +95,12 @@ function getMaintainedOecdStageBeforeOrAtCurrentHole(params: {
     const cumulative =
       cumulativeBeforeHoleByNumber[hole.holeNumber]?.[playerId] ??
       (hole.holeNumber === currentHoleNumber ? currentCumulativeBeforeHole : 0);
+
+    if (shouldResetMaintainedStage({ cumulativeBeforeHole: cumulative, settings })) {
+      highestStage = 0;
+      continue;
+    }
+
     const stage = getThresholdBasedOecdStage(cumulative, settings);
 
     if (stage > highestStage) {
