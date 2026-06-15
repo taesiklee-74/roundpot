@@ -1577,7 +1577,7 @@ export default function Home() {
     if (
       !hasStarted ||
       roundView !== "play" ||
-      oecdCommonPotForBalance > 0 ||
+      settings.oecd.penaltyDestination === "commonPot" ||
       !latePrizeBoostOffer?.shouldOffer
     ) {
       setPendingLatePrizeBoostOffer(null);
@@ -1595,7 +1595,7 @@ export default function Home() {
 
       return latePrizeBoostOffer;
     });
-  }, [hasStarted, roundView, oecdCommonPotForBalance, latePrizeBoostOffer]);
+  }, [hasStarted, roundView, settings.oecd.penaltyDestination, latePrizeBoostOffer]);
 
   function updatePlayerName(index: number, value: string) {
     setPlayerNames((prev) =>
@@ -2553,7 +2553,7 @@ function saveCurrentHoleAndShowResult() {
 
 function acceptLatePrizeBoost() {
   const offer = pendingLatePrizeBoostOffer ?? latePrizeBoostOffer;
-  if (oecdCommonPotForBalance > 0) return;
+  if (settings.oecd.penaltyDestination === "commonPot") return;
   if (!offer?.shouldOffer) return;
 
   setLatePrizeBoostDecision((prev) =>
@@ -3914,7 +3914,7 @@ function renderModeButton(mode: BettingMode) {
 
         <LatePrizeBoostPrompt
           offer={
-          hasStarted && roundView === "play" && oecdCommonPotForBalance <= 0
+          hasStarted && roundView === "play" && settings.oecd.penaltyDestination !== "commonPot"
             ? pendingLatePrizeBoostOffer ?? latePrizeBoostOffer
             : null
         }
