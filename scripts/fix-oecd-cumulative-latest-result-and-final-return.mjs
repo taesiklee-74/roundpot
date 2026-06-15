@@ -38,20 +38,6 @@ function patchLatest(label, from, to) {
   applied.push(label);
 }
 
-function insertPage(label, anchor, text, already) {
-  if (page.includes(already ?? text.trim())) {
-    skipped.push(`${label}: already applied`);
-    return;
-  }
-  const i = page.indexOf(anchor);
-  if (i === -1) {
-    skipped.push(`${label}: missing page anchor`);
-    return;
-  }
-  page = page.slice(0, i + anchor.length) + text + page.slice(i + anchor.length);
-  applied.push(label);
-}
-
 function insertLatestBefore(label, anchor, text, already) {
   if (latest.includes(already ?? text.trim())) {
     skipped.push(`${label}: already applied`);
@@ -66,7 +52,7 @@ function insertLatestBefore(label, anchor, text, already) {
   applied.push(label);
 }
 
-// Remove temporary debug panel.
+// Remove temporary late-prize debug panel.
 const debugStart = page.indexOf(`        {hasStarted && (roundView === "play" || roundView === "latest-result") && latePrizeBoostTargetHole && latePrizeBoostTargetHole.holeNumber >= 16`);
 if (debugStart !== -1) {
   const debugEndMarker = `        )}\n`;
@@ -81,25 +67,28 @@ if (debugStart !== -1) {
   skipped.push("remove late prize debug panel: not found");
 }
 
-// Helper: positive OECD receipts only, for eligibility.
-insertPage(
-  "add OECD received-only totals helper",
-  `function getOecdSettingsForSettlement(settings: BettingSettingsV2) {\n  return {\n    ...settings.oecd,\n    penaltyDestination:\n      settings.mode === "skins" ? settings.oecd.penaltyDestination : "commonPot",\n  };\n}\n`,
-  `\nfunction getOecdReceivedOnlyTotals(params: {\n  players: Player[];\n  penalties: HoleOecdPenalty[];\n  settings: BettingSettingsV2;\n  gameResult?: GameResult | null;\n}): Record<string, number> {\n  const { players, penalties, settings, gameResult = null } = params;\n  const totals = Object.fromEntries(players.map((player) => [player.id, 0]));\n  const effectiveDestination =\n    settings.mode === "skins" ? settings.oecd.penaltyDestination : "commonPot";\n\n  if (!settings.oecd.enabled || effectiveDestination !== "winner") {\n    return totals;\n  }\n\n  for (const penalty of penalties) {\n    const amount = Math.max(0, penalty.amount);\n    if (amount <= 0) continue;\n\n    const holeResult = gameResult?.holeResults.find(\n      (result) => result.holeId === penalty.holeId\n    );\n    const winnerPlayerIds =\n      !holeResult || holeResult.winnerType === "none"\n        ? []\n        : holeResult.winnerPlayerIds;\n\n    if (winnerPlayerIds.length === 0) continue;\n\n    const baseShare = Math.floor(amount / winnerPlayerIds.length);\n    let remainder = amount - baseShare * winnerPlayerIds.length;\n\n    for (const winnerPlayerId of winnerPlayerIds) {\n      const share = baseShare + (remainder > 0 ? 1 : 0);\n      remainder = Math.max(0, remainder - 1);\n      totals[winnerPlayerId] = (totals[winnerPlayerId] ?? 0) + share;\n    }\n  }\n\n  return totals;\n}\n`,
-  `function getOecdReceivedOnlyTotals`
-);
+// OECD eligibility should use current holdings, not only positive OECD receipts.
+// If an earlier local run inserted the received-only helper, remove it and restore the net OECD total.
+const receivedHelperPattern = /\nfunction getOecdReceivedOnlyTotals\(params: \{[\s\S]*?\n\}\n\nfunction getCumulativePrizeTotalsBeforeHole/;
+if (receivedHelperPattern.test(page)) {
+  page = page.replace(receivedHelperPattern, "\nfunction getCumulativePrizeTotalsBeforeHole");
+  applied.push("remove received-only OECD helper");
+} else {
+  skipped.push("remove received-only OECD helper: not found");
+}
 
-insertPage(
-  "calculate OECD received-only before hole",
-  `  const oecdBeforeHole = calculateOecdSettlementSummary({\n    players: params.players,\n    penalties: params.oecdPenalties.filter(\n      (penalty) => penalty.holeNumber < params.targetHoleNumber\n    ),\n    settings: getOecdSettingsForSettlement(params.settings),\n    gameResult: calculationBeforeHole?.gameResult ?? null,\n  });`,
-  `\n\n  const oecdReceivedBeforeHole = getOecdReceivedOnlyTotals({\n    players: params.players,\n    penalties: params.oecdPenalties.filter(\n      (penalty) => penalty.holeNumber < params.targetHoleNumber\n    ),\n    settings: params.settings,\n    gameResult: calculationBeforeHole?.gameResult ?? null,\n  });`,
-  `const oecdReceivedBeforeHole = getOecdReceivedOnlyTotals`
-);
+const receivedBeforePattern = /\n\n  const oecdReceivedBeforeHole = getOecdReceivedOnlyTotals\(\{[\s\S]*?\n  \}\);/;
+if (receivedBeforePattern.test(page)) {
+  page = page.replace(receivedBeforePattern, "");
+  applied.push("remove received-only OECD before-hole calculation");
+} else {
+  skipped.push("remove received-only OECD before-hole calculation: not found");
+}
 
 patchPage(
-  "OECD eligibility uses received-only positive OECD",
-  `    const oecdTotal = oecdBeforeHole.byPlayerId[player.id] ?? 0;\n\n    acc[player.id] = gameTotal + nearTotal + oecdTotal;`,
-  `    const oecdReceivedTotal = oecdReceivedBeforeHole[player.id] ?? 0;\n\n    acc[player.id] = gameTotal + nearTotal + oecdReceivedTotal;`
+  "restore OECD eligibility to current holdings",
+  `    const oecdReceivedTotal = oecdReceivedBeforeHole[player.id] ?? 0;\n\n    acc[player.id] = gameTotal + nearTotal + oecdReceivedTotal;`,
+  `    const oecdTotal = oecdBeforeHole.byPlayerId[player.id] ?? 0;\n\n    acc[player.id] = gameTotal + nearTotal + oecdTotal;`
 );
 
 // Return to final-share when round has no incomplete holes.
@@ -109,12 +98,13 @@ patchPage(
   `  if (firstIncompleteHoleIndex !== null) {\n    setCurrentHoleIndex(firstIncompleteHoleIndex);\n    setRoundView("play");\n    return;\n  }\n\n  setRoundView("final-share");`
 );
 
-// Latest result: move near card below result card.
+// Latest result: move near card below the main result card.
+const latestBeforeNearMove = latest;
 latest = latest.replace(
   /\n\s*\{nearResult && latestNearWinnerPlayerId && \([\s\S]*?\n\s*\)\}\n\n\s*\{settings\.mode === "school" \? \(/,
   `\n\n      {settings.mode === "school" ? (`
 );
-if (latest !== beforeLatest) {
+if (latest !== latestBeforeNearMove) {
   applied.push("remove top near winner card");
 } else {
   skipped.push("remove top near winner card: not found or already removed");
