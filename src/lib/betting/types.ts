@@ -35,7 +35,8 @@ export type BettingMode =
 
 export type VegasTeamMode =
   | "randomAfterHole"
-  | "previousRanks";
+  | "previousRanks"
+  | "fixedMatchup";
 
 export type VegasTeamAssignmentMode =
   | "auto"

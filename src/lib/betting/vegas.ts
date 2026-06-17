@@ -157,6 +157,14 @@ function pickSeededPlayer(
   return seededShuffle(standings, seed)[0];
 }
 
+function withoutPicked(
+  standings: PlayerHoleStanding[],
+  picked: PlayerHoleStanding[]
+): PlayerHoleStanding[] {
+  const pickedIds = new Set(picked.map((standing) => standing.player.id));
+  return standings.filter((standing) => !pickedIds.has(standing.player.id));
+}
+
 function createPreviousRanksTeamAssignmentFromStandings(params: {
   hole: Hole;
   previousHole: Hole;
@@ -178,7 +186,6 @@ function createPreviousRanksTeamAssignmentFromStandings(params: {
     .map(([, group]) => group);
 
   const groupSizes = scoreGroups.map((group) => group.length).join("-");
-
   const reason = `전홀 ${previousHole.holeNumber}번 홀 1·4등 vs 2·3등`;
 
   if (groupSizes === "1-1-1-1") {
@@ -187,6 +194,68 @@ function createPreviousRanksTeamAssignmentFromStandings(params: {
       [standings[0].player.id, standings[3].player.id],
       [standings[1].player.id, standings[2].player.id],
       reason
+    );
+  }
+
+  if (groupSizes === "2-1-1") {
+    const selectedFirst = pickSeededPlayer(
+      scoreGroups[0],
+      `vegas-tied-first:${previousHole.id}:${hole.id}`
+    );
+    const otherFirst = withoutPicked(scoreGroups[0], [selectedFirst])[0];
+
+    if (!otherFirst) {
+      return createRandomTeamAssignment(hole, players, `vegas-invalid-tied-first-${previousHole.id}`);
+    }
+
+    return createTeamsFromPlayerIds(
+      hole,
+      [selectedFirst.player.id, scoreGroups[1][0].player.id],
+      [otherFirst.player.id, scoreGroups[2][0].player.id],
+      `${reason} · 1등 동률 부분 랜덤`
+    );
+  }
+
+  if (groupSizes === "2-2") {
+    const selectedFirst = pickSeededPlayer(
+      scoreGroups[0],
+      `vegas-tied-first-pair:${previousHole.id}:${hole.id}`
+    );
+    const selectedLower = pickSeededPlayer(
+      scoreGroups[1],
+      `vegas-tied-lower-pair:${previousHole.id}:${hole.id}`
+    );
+    const otherFirst = withoutPicked(scoreGroups[0], [selectedFirst])[0];
+    const otherLower = withoutPicked(scoreGroups[1], [selectedLower])[0];
+
+    if (!otherFirst || !otherLower) {
+      return createRandomTeamAssignment(hole, players, `vegas-invalid-two-pairs-${previousHole.id}`);
+    }
+
+    return createTeamsFromPlayerIds(
+      hole,
+      [selectedFirst.player.id, selectedLower.player.id],
+      [otherFirst.player.id, otherLower.player.id],
+      `${reason} · 1등-하위 동률 부분 랜덤`
+    );
+  }
+
+  if (groupSizes === "3-1") {
+    const selectedFirst = pickSeededPlayer(
+      scoreGroups[0],
+      `vegas-three-tied-first:${previousHole.id}:${hole.id}`
+    );
+    const otherFirsts = withoutPicked(scoreGroups[0], [selectedFirst]);
+
+    if (otherFirsts.length !== 2) {
+      return createRandomTeamAssignment(hole, players, `vegas-invalid-three-first-${previousHole.id}`);
+    }
+
+    return createTeamsFromPlayerIds(
+      hole,
+      [selectedFirst.player.id, scoreGroups[1][0].player.id],
+      [otherFirsts[0].player.id, otherFirsts[1].player.id],
+      `${reason} · 1등 3명 동률 부분 랜덤`
     );
   }
 
@@ -199,29 +268,22 @@ function createPreviousRanksTeamAssignmentFromStandings(params: {
     );
   }
 
-  if (groupSizes === "2-1-1") {
-    const selectedFirst = pickSeededPlayer(
-      scoreGroups[0],
-      `vegas-tied-first:${previousHole.id}:${hole.id}`
+  if (groupSizes === "1-3") {
+    const selectedSecond = pickSeededPlayer(
+      scoreGroups[1],
+      `vegas-three-tied-second:${previousHole.id}:${hole.id}`
     );
+    const otherSeconds = withoutPicked(scoreGroups[1], [selectedSecond]);
 
-    const otherFirst = scoreGroups[0].find(
-      (standing) => standing.player.id !== selectedFirst.player.id
-    );
-
-    if (!otherFirst) {
-      return createRandomTeamAssignment(
-        hole,
-        players,
-        `vegas-invalid-tied-first-${previousHole.id}`
-      );
+    if (otherSeconds.length !== 2) {
+      return createRandomTeamAssignment(hole, players, `vegas-invalid-three-second-${previousHole.id}`);
     }
 
     return createTeamsFromPlayerIds(
       hole,
-      [selectedFirst.player.id, scoreGroups[1][0].player.id],
-      [otherFirst.player.id, scoreGroups[2][0].player.id],
-      `${reason} · 1등 동률`
+      [scoreGroups[0][0].player.id, selectedSecond.player.id],
+      [otherSeconds[0].player.id, otherSeconds[1].player.id],
+      `${reason} · 2등 3명 동률 부분 랜덤`
     );
   }
 
@@ -230,25 +292,22 @@ function createPreviousRanksTeamAssignmentFromStandings(params: {
       scoreGroups[2],
       `vegas-tied-third:${previousHole.id}:${hole.id}`
     );
-
-    const otherThird = scoreGroups[2].find(
-      (standing) => standing.player.id !== selectedThird.player.id
-    );
+    const otherThird = withoutPicked(scoreGroups[2], [selectedThird])[0];
 
     if (!otherThird) {
-      return createRandomTeamAssignment(
-        hole,
-        players,
-        `vegas-invalid-tied-third-${previousHole.id}`
-      );
+      return createRandomTeamAssignment(hole, players, `vegas-invalid-tied-third-${previousHole.id}`);
     }
 
     return createTeamsFromPlayerIds(
       hole,
       [scoreGroups[0][0].player.id, selectedThird.player.id],
       [scoreGroups[1][0].player.id, otherThird.player.id],
-      `${reason} · 3등 동률`
+      `${reason} · 3등 동률 부분 랜덤`
     );
+  }
+
+  if (groupSizes === "4") {
+    return createRandomTeamAssignment(hole, players, `vegas-all-tied-previous-hole-${previousHole.id}`);
   }
 
   return createRandomTeamAssignment(
@@ -303,6 +362,49 @@ function getStoredAssignment(
   return teamAssignments?.find((assignment) => assignment.holeId === hole.id) ?? null;
 }
 
+function cloneTeamAssignmentToHole(
+  assignment: TeamAssignment,
+  hole: Hole,
+  reason: string
+): TeamAssignment {
+  return {
+    holeId: hole.id,
+    holeNumber: hole.holeNumber,
+    teams: assignment.teams.map((team) => ({
+      ...team,
+      playerIds: [...team.playerIds],
+    })) as [Team, Team],
+    reason,
+  };
+}
+
+function getFirstStoredVegasAssignment(
+  teamAssignments: TeamAssignment[] | undefined
+): TeamAssignment | null {
+  return (teamAssignments ?? [])
+    .slice()
+    .sort((a, b) => a.holeNumber - b.holeNumber)
+    .find((assignment) => assignment.teams.length === 2) ?? null;
+}
+
+function createFixedMatchupTeamAssignment(
+  hole: Hole,
+  players: Player[],
+  teamAssignments: TeamAssignment[] | undefined
+): TeamAssignment {
+  const firstAssignment = getFirstStoredVegasAssignment(teamAssignments);
+
+  if (firstAssignment) {
+    return cloneTeamAssignmentToHole(
+      firstAssignment,
+      hole,
+      `맞수 팀 대결 · ${firstAssignment.holeNumber}번 홀 팀 유지`
+    );
+  }
+
+  return createRandomTeamAssignment(hole, players, "vegas-fixed-matchup-fallback");
+}
+
 export function createVegasTeamAssignment(params: {
   hole: Hole;
   players: Player[];
@@ -317,6 +419,10 @@ export function createVegasTeamAssignment(params: {
 
   if (storedAssignment) {
     return storedAssignment;
+  }
+
+  if (settings.teamMode === "fixedMatchup") {
+    return createFixedMatchupTeamAssignment(hole, players, teamAssignments);
   }
 
   if (settings.teamMode === "previousRanks") {
@@ -587,6 +693,29 @@ export function getVegasCurrentGamePreview(params: {
       carriedIn,
       prizeAmount,
       teams: storedAssignment.teams,
+    };
+  }
+
+  if (settings.teamMode === "fixedMatchup") {
+    const fixedAssignment =
+      storedAssignment ??
+      (getFirstStoredVegasAssignment(teamAssignments)
+        ? createFixedMatchupTeamAssignment(nextHole, players, teamAssignments)
+        : null);
+
+    return {
+      holeId: nextHole.id,
+      holeNumber: nextHole.holeNumber,
+      gameType: "vegas",
+      title: `${nextHole.holeNumber}번 홀 라스베가스`,
+      description:
+        carriedIn > 0
+          ? `이월 ${carriedIn.toLocaleString()}원 포함. 맞수 팀 대결로 같은 팀 구성을 유지합니다.`
+          : "맞수 팀 대결로 같은 팀 구성을 유지합니다.",
+      baseAmount,
+      carriedIn,
+      prizeAmount,
+      teams: fixedAssignment?.teams,
     };
   }
 

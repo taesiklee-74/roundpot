@@ -3164,6 +3164,12 @@ function renderModeButton(mode: BettingMode) {
                       teamAssignmentMode: "auto" as const,
                     },
                     {
+                      key: "fixedMatchup",
+                      label: "맞수 팀 대결",
+                      teamMode: "fixedMatchup" as const,
+                      teamAssignmentMode: "auto" as const,
+                    },
+                    {
                       key: "manualAfterHole",
                       label: "홀 종료 후 직접 입력",
                       teamMode: "randomAfterHole" as const,
@@ -3560,9 +3566,10 @@ function renderModeButton(mode: BettingMode) {
 
   const shouldManuallySelectFirstVegasTeams =
     settings.mode === "vegas" &&
-    settings.vegas.teamMode === "previousRanks" &&
-    settings.vegas.teamAssignmentMode === "auto" &&
-    currentHole.holeNumber === 1;
+    currentHole?.holeNumber === 1 &&
+    (settings.vegas.teamMode === "previousRanks" ||
+      settings.vegas.teamMode === "fixedMatchup") &&
+    !vegasTeamAssignments.some((assignment) => assignment.holeId === currentHole.id);
     
   const firstVegasManualTeams: [Team, Team] =
     manualVegasTeamAPlayerIds.length === 2
@@ -4151,15 +4158,19 @@ function renderModeButton(mode: BettingMode) {
             ) && (
               <section className="rounded-2xl bg-orange-50 p-5 shadow-sm">
                 <h2 className="text-lg font-bold text-orange-950">
-                  {shouldManuallySelectFirstVegasTeams
-                    ? "1번 홀 팀 선택"
-                    : "이번 홀 팀 직접 입력"}
+                  {settings.vegas.teamMode === "fixedMatchup"
+                    ? "맞수 팀 선택"
+                    : shouldManuallySelectFirstVegasTeams
+                      ? "1번 홀 팀 선택"
+                      : "이번 홀 팀 직접 입력"}
                 </h2>
 
                 <p className="mt-1 text-sm text-orange-800">
-                  {shouldManuallySelectFirstVegasTeams
-                    ? "1번 홀 팀을 직접 선택하세요. 팀 A 2명을 선택하면 나머지 2명은 팀 B가 됩니다."
-                    : "팀 A 2명을 선택하세요. 나머지 2명은 팀 B가 됩니다."}
+                  {settings.vegas.teamMode === "fixedMatchup"
+                    ? "1번 홀에서 맞수 팀을 선택하세요. 이 팀 구성이 라운드 종료까지 유지됩니다."
+                    : shouldManuallySelectFirstVegasTeams
+                      ? "1번 홀 팀을 직접 선택하세요. 팀 A 2명을 선택하면 나머지 2명은 팀 B가 됩니다."
+                      : "팀 A 2명을 선택하세요. 나머지 2명은 팀 B가 됩니다."}
                 </p>
 
                 {(() => {
